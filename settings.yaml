@@ -1,0 +1,9 @@
+# This is just an example of a settings file.
+# Feel free to modify this to fit your use case.
+serviceEntry:
+  watchAllServiceEntries: false
+sdwan:
+  # Base URL where to reach sdwan's API,
+  # e.g: https://example.com:9876/api
+  baseUrl: <base_url>
+  insecure: false

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: egress-watcher
+  name: egress-watcher
+  namespace: egress-watcher
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: egress-watcher
+  template:
+    metadata:
+      labels:
+        app: egress-watcher
+    spec:
+      containers:
+      - image: image/image
+        imagePullPolicy: Always
+        name: egress-watcher
+        args:
+        - "run"
+        - "with-vmanage"
+        - "--settings-file=/settings/settings.yaml"
+        - "--sdwan.username=$(SDWAN_USERNAME)"
+        - "--sdwan.password=$(SDWAN_PASSWORD)"
+        - "--verbosity=0"
+        volumeMounts:
+        - name: config-volume
+          mountPath: /settings
+        resources:
+            limits:
+              cpu: 200m
+              memory: 100Mi
+            requests:
+              cpu: 100m
+              memory: 50Mi
+        env:
+        - name: SDWAN_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: vmanage-credentials
+              key: username
+        - name: SDWAN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: vmanage-credentials
+              key: password
+      volumes:
+      - name: config-volume
+        configMap:
+          name: egress-watcher-settings
+      serviceAccountName: egress-watcher-service-account
+      serviceAccount: egress-watcher-service-account
+status: {}

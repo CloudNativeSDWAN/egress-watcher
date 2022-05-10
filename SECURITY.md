@@ -2,13 +2,12 @@
 
 ## Supported Versions
 
-Please understand that *Egress Watcher* may receive heavy modifications as well as breaking changes on
+Please understand that *Egress Watcher* may receive heavy modifications with potentially breaking changes on
 future versions.
 
 We will try our best to let you know about them either in *PRs*, *issues* or
 *discussions* and still support previous features/functionalities for a couple of versions before
-deprecating them, but currently it must not be considered in a "stable" state and thus you should
-expect breaking changes and deprecated functionalities in future versions.
+deprecating them, but currently the code must not be considered yet in a "stable" state.
 
 | Version | Supported          |
 | ------- | ------------------ |
@@ -16,13 +15,13 @@ expect breaking changes and deprecated functionalities in future versions.
 
 ## Reporting a Vulnerability
 
-Please **do not** disclose security vulnerabilites publicly, that is neither on discussions nor issues.
-Instead, reach out to one of the owners of the project defined at
-[OWNERS.md](https://github.com/CloudNativeSDWAN/egress-watcher/blob/main/OWNERS.md) and talk about the
-issue privately via email.
+Please **do not** disclose security vulnerabilities publicly, that is neither on discussions nor issues.
+Instead, kindly reach out to one of the owners of the project defined at
+[OWNERS.md](https://github.com/CloudNativeSDWAN/egress-watcher/blob/main/OWNERS.md) to discuss the
+vulnerability privately via email.
 
 For example, if you find that the project accidentally exposes a password or any sensitive data - e.g.
-by printing on console or logs, you should bring this privately.
+by printing on console or logs, we kindly ask you to bring this privately.
 
-Typos, unexpected errors, crashes or anything that does not expose sensitive data or does not allow for
-unauthorized actions must be brought up in *Issues*.
+Typos, unexpected errors, crashes, and in general anything that does not expose sensitive data or does not allow for
+unauthorized actions, can be safely brought publicly up in *Issues*.

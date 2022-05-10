@@ -176,5 +176,5 @@ Before starting, please make sure you know and agree to our [Code of conduct](./
 
 Egress Watcher is free and open-source software licensed under the *Apache 2.0*
 License.
-
-Refer to [our license file](github.com/CloudNativeSDWAN/egress-watcher/blob/main/LICENSE).
+                            
+Refer to [our license file](https://github.com/CloudNativeSDWAN/egress-watcher/blob/main/LICENSE).

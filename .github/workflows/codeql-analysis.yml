@@ -3,11 +3,20 @@ name: "CodeQL"
 on:
   push:
     branches: [ main ]
+    paths-ignore:
+      - '**/*.yaml'
+      - '.github/**'
+      - '**/*.mod'
+      - '**/*.sum'
+      - '**/*.md'
+      - '**/*.txt'
   pull_request:
     branches: [ main ]
     paths-ignore:
       - '**/*.yaml'
       - '.github/**'
+      - '**/*.mod'
+      - '**/*.sum'
       - '**/*.md'
       - '**/*.txt'
     # Note: we don't run this on schedule as of now, but we may need to do that

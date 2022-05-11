@@ -1,5 +1,14 @@
 name: Check Markdown links
-on: [push, pull_request]
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
 jobs:
   markdown-link-check:
     runs-on: ubuntu-latest

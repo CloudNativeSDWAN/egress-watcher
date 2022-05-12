@@ -51,6 +51,7 @@ type Options struct {
 	ServiceEntryController *controllers.ServiceEntryOptions `yaml:"serviceEntry,omitempty"`
 	Sdwan                  *sdwan.Options                   `yaml:"sdwan,omitempty"`
 	Verbosity              int                              `yaml:"verbosity"`
+	PrettyLogs             bool                             `yaml:"prettyLogs"`
 }
 
 func getRunCommand() *cobra.Command {
@@ -186,17 +187,15 @@ The following controllers are supported:
 	cmd.Flags().IntVar(&flagOpts.Verbosity,
 		"verbosity", 1,
 		"verbosity level, from 0 to 3.")
+	cmd.Flags().BoolVar(&flagOpts.PrettyLogs,
+		"pretty-logs", false,
+		"whether to log data in a slower but human readable format.")
 
 	return cmd
 }
 
 func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
-	log := zerolog.New(os.Stderr).With().Timestamp().Logger()
-	mgr, err := controllers.NewManager()
-	if err != nil {
-		return fmt.Errorf("could not get manager: %w", err)
-	}
-
+	var log zerolog.Logger
 	{
 		logLevels := [3]zerolog.Level{
 			zerolog.DebugLevel,
@@ -205,14 +204,23 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		}
 
 		if opts.Verbosity < 0 || opts.Verbosity > 3 {
-			log.Error().
-				Int("level", opts.Verbosity).
-				Int("default", defaultVerbosity).
-				Msg("invalid verbosity level provided, using default")
+			fmt.Println("invalid verbosity level provided, using default")
 			opts.Verbosity = defaultVerbosity
 		}
 
+		if opts.PrettyLogs {
+			log = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
+		} else {
+			log = zerolog.New(os.Stderr).With().Timestamp().Logger()
+		}
+
 		log = log.Level(logLevels[opts.Verbosity])
+		log.Info().Msg("starting...")
+	}
+
+	mgr, err := controllers.NewManager()
+	if err != nil {
+		return fmt.Errorf("could not get manager: %w", err)
 	}
 
 	ctx, canc := context.WithCancel(context.Background())

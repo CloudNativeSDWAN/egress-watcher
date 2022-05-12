@@ -358,6 +358,28 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 		names[i] = op.ApplicationName
 	}
 	log = log.With().Str("worker", "adder").Logger()
+
+	{
+		log.Debug().Msg("checking for existing custom applications before continuing")
+		existingCustomApps, err := v.PolicyApplicationsList().
+			ListCustomApplications(ctx)
+		if err != nil {
+			log.Err(err).Msg("error while checking existing applications: next operations may fail")
+		}
+
+		for _, exCustApp := range existingCustomApps {
+			for i := 0; i < len(customApplications); i++ {
+				if customApplications[i].Name == exCustApp.Name {
+					customApplications[i].ID = exCustApp.ID
+					log.Debug().
+						Str("app-id", customApplications[i].ID).
+						Str("current-app", customApplications[i].Name).
+						Msg("custom application already exists, skipping creation...")
+				}
+			}
+		}
+	}
+
 	log.Info().Strs("names", names).Msg("adding custom applications, this may take a while...")
 
 	// The next two steps can be done in just one loop, but since this involves
@@ -367,6 +389,10 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 
 	// -- First, create the custom applications.
 	for i, customApp := range customApplications {
+		if customApp.ID != "" {
+			continue
+		}
+
 		appID, err := v.PolicyApplicationsList().
 			CreateCustomApplication(ctx, customApp)
 		if err != nil {

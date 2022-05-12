@@ -20,6 +20,7 @@ package vmanage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -410,6 +411,25 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 	// listIDs is map that associates custom app name -> policy application list ID
 	listIDs := map[string]string{}
 	for _, customApp := range customApplications {
+		// Does it already exist?
+		appList, err := v.PolicyApplicationsList().
+			GetApplicationListByName(ctx, customApp.Name)
+		if err != nil {
+			if !errors.Is(err, sdwan.ErrNotFound) {
+				log.Err(err).
+					Str("current-app", customApp.Name).
+					Msg("error while checking if policy exists, next operations may fail")
+			}
+		} else {
+			log.Debug().
+				Str("list-id", appList.ID).
+				Str("current-app", customApp.Name).
+				Msg("a policy application list already exists for this: skipping...")
+			listIDs[customApp.Name] = appList.ID
+
+			continue
+		}
+
 		listID, err := v.
 			PolicyApplicationsList().
 			CreatePolicyApplicationList(ctx, customApp)

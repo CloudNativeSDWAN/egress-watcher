@@ -28,6 +28,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan/vmanage/types/policy"
 )
 
@@ -265,7 +266,7 @@ func (p *policyOps) GetApplicationListByName(ctx context.Context, name string) (
 		}
 	}
 
-	return nil, fmt.Errorf("not found")
+	return nil, sdwan.ErrNotFound
 }
 
 func (p *policyOps) ListCustomApplications(ctx context.Context) ([]*policy.CustomApplication, error) {

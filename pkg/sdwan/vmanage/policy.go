@@ -36,6 +36,7 @@ const (
 
 	customAppPath      string = "template/policy/customapp"
 	appsListPolicyPath string = "template/policy/list/app"
+	listCustomAppsPath string = "template/policy/customapp"
 )
 
 type policyOps struct {
@@ -265,4 +266,30 @@ func (p *policyOps) GetApplicationListByName(ctx context.Context, name string) (
 	}
 
 	return nil, fmt.Errorf("not found")
+}
+
+func (p *policyOps) ListCustomApplications(ctx context.Context) ([]*policy.CustomApplication, error) {
+	u := url.URL{Path: listCustomAppsPath}
+	_, bodyResp, err := p.vclient.do(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return nil, fmt.Errorf("could not perform request: %w", err)
+	}
+
+	// --------------------------------
+	// Parse the response
+	// --------------------------------
+
+	var appLists []*policy.CustomApplication
+	{
+		data, err := getRawMessageFromResponseBody(bodyResp, "data")
+		if err != nil {
+			return nil, err
+		}
+
+		if err := json.Unmarshal(data, &appLists); err != nil {
+			return nil, fmt.Errorf("could not unmarshal response body: %w", err)
+		}
+	}
+
+	return appLists, nil
 }

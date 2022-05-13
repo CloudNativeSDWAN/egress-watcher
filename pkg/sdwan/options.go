@@ -3,7 +3,7 @@ package sdwan
 import "time"
 
 const (
-	DefaultWaitingWindow time.Duration = time.Minute
+	DefaultWaitingWindow time.Duration = 30 * time.Second
 )
 
 type Authentication struct {

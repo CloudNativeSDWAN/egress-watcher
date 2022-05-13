@@ -9,4 +9,4 @@ sdwan:
   insecure: false
   prettyLogs: false
   verbosity: 1
-  waitingWindow: 1m
+  waitingWindow: 30s

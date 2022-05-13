@@ -67,13 +67,25 @@ func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan
 				}
 			}
 
-			switch op.Type {
-			case sdwan.OperationAdd:
-				toAdd = append(toAdd, op)
-			case sdwan.OperationRemove:
-				toRemove = append(toRemove, op)
-			default:
-				log.Error().Str("type", string(op.Type)).Msg("invalid operation type provided: skipping...")
+			toBeCategorized := []*sdwan.Operation{op}
+
+			for len(opsChan) > 0 && waitingWindow == 0 {
+				// If the waiting window is disabled, then we will try to get
+				// all other pending operations, so we will not only work on
+				// one operation at time: that would be disastrous for
+				// performance!
+				toBeCategorized = append(toBeCategorized, <-opsChan)
+			}
+
+			for _, cat := range toBeCategorized {
+				switch cat.Type {
+				case sdwan.OperationAdd:
+					toAdd = append(toAdd, cat)
+				case sdwan.OperationRemove:
+					toRemove = append(toRemove, cat)
+				default:
+					log.Error().Str("type", string(cat.Type)).Msg("invalid operation type provided: skipping...")
+				}
 			}
 		case <-waitingTimer.C:
 			log.Info().Msg("worker in busy mode")

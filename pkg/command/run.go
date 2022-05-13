@@ -273,7 +273,7 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		go func() {
 			defer close(exitWatch)
 
-			if err = vclient.WatchForOperations(ctx, opsChan, log); err != nil {
+			if err = vclient.WatchForOperations(ctx, opsChan, *opts.Sdwan.WaitingWindow, log); err != nil {
 				log.Err(err).Msg("error while watch for operations")
 				return
 			}

@@ -33,17 +33,16 @@ import (
 )
 
 const (
-	defaultWaitingTimer  time.Duration = time.Minute
 	defaultOpTimeout     time.Duration = 5 * time.Minute
 	defaultReauthTimeout time.Duration = 30 * time.Second
 )
 
-func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan.Operation, log zerolog.Logger) error {
+func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan.Operation, waitingWindow time.Duration, log zerolog.Logger) error {
 	toRemove, toAdd := []*sdwan.Operation{}, []*sdwan.Operation{}
 
 	// We stop it immediately, because we only want it to be active
 	// when we have at least one operation.
-	waitingTimer := time.NewTimer(defaultWaitingTimer)
+	waitingTimer := time.NewTimer(waitingWindow)
 	waitingTimer.Stop()
 
 	log.Info().Msg("worker in free mode")
@@ -61,8 +60,11 @@ func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan
 				Msg("received operation request")
 
 			if len(toRemove) == 0 && len(toAdd) == 0 {
-				log.Info().Str("waiting-duration", defaultWaitingTimer.String()).Msg("starting waiting mode")
-				waitingTimer = time.NewTimer(defaultWaitingTimer)
+				waitingTimer = time.NewTimer(waitingWindow)
+
+				if waitingWindow > 0 {
+					log.Info().Str("waiting-duration", waitingWindow.String()).Msg("starting waiting mode")
+				}
 			}
 
 			switch op.Type {
@@ -74,7 +76,7 @@ func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan
 				log.Error().Str("type", string(op.Type)).Msg("invalid operation type provided: skipping...")
 			}
 		case <-waitingTimer.C:
-			log.Info().Msg("busy mode activated")
+			log.Info().Msg("worker in busy mode")
 
 			if err := func() error {
 				log.Debug().Msg("checking authentication...")

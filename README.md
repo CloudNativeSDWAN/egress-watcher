@@ -1,3 +1,12 @@
+# KubeCon EU 2022
+
+The Egress Watcher team will be at KubeCon EU 2022 with a running demo! If you're around come chat with us!
+
+*Where:* **Cisco booth - Pavilion 2, Booth D4**
+
+*When:* **Tuesday @ 10:45** and **Wednesday @ 11:45**
+
+
 # Egress Watcher
 
 ![GitHub](https://img.shields.io/github/license/CloudNativeSDWAN/egress-watcher)

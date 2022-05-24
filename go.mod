@@ -6,8 +6,8 @@ require (
 	github.com/rs/zerolog v1.26.1
 	github.com/spf13/cobra v1.4.0
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
-	istio.io/api v0.0.0-20220426030804-14e12fe188cf
-	istio.io/client-go v1.13.3
+	istio.io/api v0.0.0-20220512212136-561ffec82582
+	istio.io/client-go v1.13.4
 	k8s.io/apimachinery v0.24.0
 	k8s.io/client-go v0.24.0
 	sigs.k8s.io/controller-runtime v0.11.2
@@ -65,10 +65,10 @@ require (
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.2.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
-	google.golang.org/genproto v0.0.0-20210831024726-fe130286e0e2 // indirect
 	google.golang.org/protobuf v1.27.1 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
+	istio.io/gogo-genproto v0.0.0-20211208193508-5ab4acc9eb1e // indirect
 	k8s.io/api v0.24.0 // indirect
 	k8s.io/component-base v0.23.5 // indirect
 	k8s.io/klog/v2 v2.60.1 // indirect

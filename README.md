@@ -1,12 +1,3 @@
-# KubeCon EU 2022
-
-The Egress Watcher team will be at KubeCon EU 2022 with a running demo! If you're around come chat with us!
-
-*Where:* **Cisco booth - Pavilion 2, Booth D4**
-
-*When:* **Tuesday @ 10:45** and **Wednesday @ 11:45**
-
-
 # Egress Watcher
 
 ![GitHub](https://img.shields.io/github/license/CloudNativeSDWAN/egress-watcher)
@@ -17,6 +8,8 @@ The Egress Watcher team will be at KubeCon EU 2022 with a running demo! If you'r
 
 Reflect your *Egress* definitions from different object types to your
 *SD-WAN* for processing and routes optmization.
+
+Find some context on the project in our [Talk](https://www.youtube.com/watch?v=POEedeeRs_8) @ KubeCon EU 2022 and in this *Cisco Tech Blog* [article](https://techblog.cisco.com/blog/tell-your-sd-wan).
 
 ## Supported projects and providers
 

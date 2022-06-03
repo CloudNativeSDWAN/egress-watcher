@@ -82,6 +82,9 @@ To ignore a service entry you will have to label it as
 * `--sdwan.username`: the username for authentication. **Required**.
 * `--sdwan.password`: the password for authentication. **Required**.
 * `--sdwan.insecure`: whether to accept self-signed certificates.
+* `--pretty-logs`: whether to log data in a slower but human readable format.
+* `--verbosity`: to set up the verbosity level. It can be from `0` (most
+* verbose) to `3` (only log important errors).
 
 As a rule of thumb, remember that flag options **overwrite** options provided
 via file.
@@ -178,5 +181,5 @@ Before starting, please make sure you know and agree to our [Code of conduct](./
 
 Egress Watcher is free and open-source software licensed under the *Apache 2.0*
 License.
-                            
+
 Refer to [our license file](https://github.com/CloudNativeSDWAN/egress-watcher/blob/main/LICENSE).

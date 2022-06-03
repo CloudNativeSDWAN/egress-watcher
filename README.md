@@ -83,6 +83,8 @@ To ignore a service entry you will have to label it as
 * `--sdwan.password`: the password for authentication. **Required**.
 * `--sdwan.insecure`: whether to accept self-signed certificates.
 * `--pretty-logs`: whether to log data in a slower but human readable format.
+* `--verbosity`: to set up the verbosity level. It can be from `0` (most
+* verbose) to `3` (only log important errors).
 
 As a rule of thumb, remember that flag options **overwrite** options provided
 via file.

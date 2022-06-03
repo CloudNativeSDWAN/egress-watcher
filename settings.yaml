@@ -8,3 +8,4 @@ sdwan:
   baseUrl: <base_url>
   insecure: false
   prettyLogs: false
+  verbosity: 1

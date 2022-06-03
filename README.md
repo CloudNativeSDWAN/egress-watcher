@@ -83,8 +83,8 @@ To ignore a service entry you will have to label it as
 * `--sdwan.password`: the password for authentication. **Required**.
 * `--sdwan.insecure`: whether to accept self-signed certificates.
 * `--pretty-logs`: whether to log data in a slower but human readable format.
-* `--verbosity`: to set up the verbosity level. It can be from `0` (most
-* verbose) to `3` (only log important errors). Default is `1`.
+* `--verbosity`: to set up the verbosity level. It can be from `0` (most 
+verbose) to `3` (only log important errors). Default is `1`.
 * `--waiting-window`: the duration of the waiting mode. Set this to 0 to
   disable it entirely. For example, if you set `1m`, Egress Watcher will
   wait one minute for other changes to appear before applying them in

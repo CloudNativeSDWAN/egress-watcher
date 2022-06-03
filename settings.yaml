@@ -7,3 +7,4 @@ sdwan:
   # e.g: https://example.com:9876/api
   baseUrl: <base_url>
   insecure: false
+  prettyLogs: false

@@ -135,6 +135,10 @@ The following controllers are supported:
 					opts.Sdwan.BaseURL = flagOpts.Sdwan.BaseURL
 				}
 
+				if cmd.Flag("waiting-window").Changed {
+					opts.Sdwan.WaitingWindow = flagOpts.Sdwan.WaitingWindow
+				}
+
 				if cmd.Flag("sdwan.insecure").Changed {
 					opts.Sdwan.Insecure = flagOpts.Sdwan.Insecure
 				}
@@ -142,6 +146,10 @@ The following controllers are supported:
 
 			if _, err := url.Parse(opts.Sdwan.BaseURL); err != nil {
 				return fmt.Errorf("invalid base url provided: %w", err)
+			}
+
+			if *opts.Sdwan.WaitingWindow < 0 {
+				return fmt.Errorf("invalid waiting window provided")
 			}
 
 			if cmd.Flag("watch-all-service-entries").Changed {
@@ -190,6 +198,9 @@ The following controllers are supported:
 	cmd.Flags().BoolVar(&flagOpts.PrettyLogs,
 		"pretty-logs", false,
 		"whether to log data in a slower but human readable format.")
+	cmd.Flags().DurationVar(flagOpts.Sdwan.WaitingWindow,
+		"waiting-window", sdwan.DefaultWaitingWindow,
+		"the duration of the waiting mode. Set this to 0 to disable it entirely.")
 
 	return cmd
 }
@@ -262,7 +273,7 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		go func() {
 			defer close(exitWatch)
 
-			if err = vclient.WatchForOperations(ctx, opsChan, log); err != nil {
+			if err = vclient.WatchForOperations(ctx, opsChan, *opts.Sdwan.WaitingWindow, log); err != nil {
 				log.Err(err).Msg("error while watch for operations")
 				return
 			}

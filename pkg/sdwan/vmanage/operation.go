@@ -20,6 +20,7 @@ package vmanage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -358,6 +359,28 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 		names[i] = op.ApplicationName
 	}
 	log = log.With().Str("worker", "adder").Logger()
+
+	{
+		log.Debug().Msg("checking for existing custom applications before continuing")
+		existingCustomApps, err := v.PolicyApplicationsList().
+			ListCustomApplications(ctx)
+		if err != nil {
+			log.Err(err).Msg("error while checking existing applications: next operations may fail")
+		}
+
+		for _, exCustApp := range existingCustomApps {
+			for i := 0; i < len(customApplications); i++ {
+				if customApplications[i].Name == exCustApp.Name {
+					customApplications[i].ID = exCustApp.ID
+					log.Debug().
+						Str("app-id", customApplications[i].ID).
+						Str("current-app", customApplications[i].Name).
+						Msg("custom application already exists, skipping creation...")
+				}
+			}
+		}
+	}
+
 	log.Info().Strs("names", names).Msg("adding custom applications, this may take a while...")
 
 	// The next two steps can be done in just one loop, but since this involves
@@ -367,6 +390,10 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 
 	// -- First, create the custom applications.
 	for i, customApp := range customApplications {
+		if customApp.ID != "" {
+			continue
+		}
+
 		appID, err := v.PolicyApplicationsList().
 			CreateCustomApplication(ctx, customApp)
 		if err != nil {
@@ -384,6 +411,25 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 	// listIDs is map that associates custom app name -> policy application list ID
 	listIDs := map[string]string{}
 	for _, customApp := range customApplications {
+		// Does it already exist?
+		appList, err := v.PolicyApplicationsList().
+			GetApplicationListByName(ctx, customApp.Name)
+		if err != nil {
+			if !errors.Is(err, sdwan.ErrNotFound) {
+				log.Err(err).
+					Str("current-app", customApp.Name).
+					Msg("error while checking if policy exists, next operations may fail")
+			}
+		} else {
+			log.Debug().
+				Str("list-id", appList.ID).
+				Str("current-app", customApp.Name).
+				Msg("a policy application list already exists for this: skipping...")
+			listIDs[customApp.Name] = appList.ID
+
+			continue
+		}
+
 		listID, err := v.
 			PolicyApplicationsList().
 			CreatePolicyApplicationList(ctx, customApp)

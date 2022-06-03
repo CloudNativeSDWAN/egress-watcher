@@ -18,7 +18,14 @@
 
 package sdwan
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
+
+var (
+	ErrNotFound error = errors.New("resource not found")
+)
 
 type Error struct {
 	Type    string `json:"type"`

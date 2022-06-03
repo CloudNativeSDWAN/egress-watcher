@@ -96,15 +96,33 @@ func getXSRFToken(ctx context.Context, client *http.Client, addr *url.URL) (stri
 	return string(xsrfToken), nil
 }
 
+// AreTokensStillValid tries to check if the session and XSRF tokens are still
+// valid (well, the session one especially) and return true or false as the
+// first return parameter accordingly.
+//
+// If we could not check if they are valid it returns false and the error
+// happened.
+//
+// TODO: in future this will only return an error: if tokens are not valid then
+// this will return an error of type *vmanage.ErrUnauthenticated, if they are
+// it will return nil. For any other error, it will return the error as it was
+// encountered.
 func (a *auth) AreTokensStillValid(ctx context.Context) (bool, error) {
 	u := url.URL{Path: sessionTimeoutPath}
 
 	status, _, err := a.vclient.do(ctx, http.MethodGet, u, nil)
-	if err != nil {
-		return false, fmt.Errorf("could not perform request: %w", err)
-	}
+	switch status {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusForbidden:
+		return false, nil
+	default:
+		if err != nil {
+			return false, fmt.Errorf("could not perform request: %w", err)
+		}
 
-	return status == http.StatusOK, nil
+		return false, nil
+	}
 }
 
 func (a *auth) RenewTokens(ctx context.Context) error {

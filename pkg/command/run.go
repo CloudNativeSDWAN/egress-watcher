@@ -56,10 +56,12 @@ type Options struct {
 
 func getRunCommand() *cobra.Command {
 	kopts := &kubeConfigOptions{}
+	waitingWindow := sdwan.DefaultWaitingWindow
 	flagOpts := &Options{
 		ServiceEntryController: &controllers.ServiceEntryOptions{},
 		Sdwan: &sdwan.Options{
 			Authentication: &sdwan.Authentication{},
+			WaitingWindow:  &waitingWindow,
 		},
 	}
 	opts := &Options{
@@ -68,6 +70,7 @@ func getRunCommand() *cobra.Command {
 		// sensitive information.
 		Sdwan: &sdwan.Options{
 			Authentication: &sdwan.Authentication{},
+			WaitingWindow:  &waitingWindow,
 		},
 	}
 	var (

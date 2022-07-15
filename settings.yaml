@@ -7,6 +7,6 @@ sdwan:
   # e.g: https://example.com:9876/api
   baseUrl: <base_url>
   insecure: false
-  prettyLogs: false
-  verbosity: 1
   waitingWindow: 30s
+prettyLogs: false
+verbosity: 1

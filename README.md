@@ -44,6 +44,21 @@ make build
 The project is now ready to be used locally from `./bin` directory as
 `./bin/egress-watcher`
 
+## Quickstart
+
+For a quick test of the project, you can try the `scripts/quickstart.sh` script
+included in this repository that will guide you through deploying *Egress
+Watcher* iteratively with some default values.
+
+Simply run the script like the following from the root folder of the
+repository:
+
+```bash
+./scripts/quickstart.sh
+```
+
+and follow the instructions from the script.
+
 ## Usage
 
 ### Commands
@@ -83,7 +98,7 @@ To ignore a service entry you will have to label it as
 * `--sdwan.password`: the password for authentication. **Required**.
 * `--sdwan.insecure`: whether to accept self-signed certificates.
 * `--pretty-logs`: whether to log data in a slower but human readable format.
-* `--verbosity`: to set up the verbosity level. It can be from `0` (most 
+* `--verbosity`: to set up the verbosity level. It can be from `0` (most
 verbose) to `3` (only log important errors). Default is `1`.
 * `--waiting-window`: the duration of the waiting mode. Set this to 0 to
   disable it entirely. For example, if you set `1m`, Egress Watcher will

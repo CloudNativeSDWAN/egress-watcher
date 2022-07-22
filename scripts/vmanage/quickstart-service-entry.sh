@@ -17,7 +17,6 @@ while [ -z "$vmanage_password" ]; do
     IFS= read -r vmanage_password
     stty "$stty_orig"
     echo
-    # read -s "Enter your vManage password: " vmanage_password
 done
 
 vmanage_url=""

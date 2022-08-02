@@ -6,8 +6,8 @@ require (
 	github.com/rs/zerolog v1.27.0
 	github.com/spf13/cobra v1.5.0
 	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b
-	istio.io/api v0.0.0-20220718152858-7bfd83f34438
-	istio.io/client-go v1.14.2
+	istio.io/api v0.0.0-20220728184806-7837c4e62d82
+	istio.io/client-go v1.14.3
 	k8s.io/apimachinery v0.24.3
 	k8s.io/client-go v0.24.3
 	sigs.k8s.io/controller-runtime v0.12.3

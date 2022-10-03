@@ -11,6 +11,37 @@ Reflect your *Egress* definitions from different object types to your
 
 Find some context on the project in our [Talk](https://www.youtube.com/watch?v=POEedeeRs_8) @ KubeCon EU 2022 and in this *Cisco Tech Blog* [article](https://techblog.cisco.com/blog/tell-your-sd-wan).
 
+## Table of contents
+
+- [Getting Started](#getting-started)
+- [Supported projects and providers](#supported-projects-and-providers)
+  - [Supported Egress types](#supported-egress-types)
+  - [Supported SD-WANs](#supported-sd-wans)
+- [Install](#install)
+- [Usage](#usage)
+  - [Commands](#commands)
+  - [run command](#run-command)
+  - [Watch ServiceEntry](#watch-serviceentry)
+- [Run locally](#run-locally)
+- [Run on Kubernetes](#run-on-kubernetes)
+- [Contributing](#contributing)
+- [License](#license)
+
+## Getting Started
+
+If you are using vManage as your SD-WAN controller, for a quick test of the project, you can try the `scripts/quickstart.sh` script
+included in this repository that will guide you through deploying *Egress
+Watcher* iteratively with some default values.
+
+Simply run the script like the following from the root folder of the
+repository:
+
+```bash
+./scripts/quickstart.sh
+```
+
+and follow the instructions from the script.
+
 ## Supported projects and providers
 
 ### Supported Egress types
@@ -44,29 +75,14 @@ make build
 The project is now ready to be used locally from `./bin` directory as
 `./bin/egress-watcher`
 
-## Quickstart
-
-For a quick test of the project, you can try the `scripts/quickstart.sh` script
-included in this repository that will guide you through deploying *Egress
-Watcher* iteratively with some default values.
-
-Simply run the script like the following from the root folder of the
-repository:
-
-```bash
-./scripts/quickstart.sh
-```
-
-and follow the instructions from the script.
-
 ## Usage
 
 ### Commands
 
 There are currently two commands:
 
-* `help`: Help about any command
-* `run`: Run locally.
+- `help`: Help about any command
+- `run`: Run locally.
 
 ### run command
 
@@ -76,31 +92,31 @@ An example of a file is provided in the root directory with `settings.yaml`.
 
 `run` needs an argument specifying the SD-WAN controller it needs to work with:
 
-* for *vManage* specify `vmanage` (or `with-vmanage`)
+- for *vManage* specify `vmanage` (or `with-vmanage`)
 
 Currently it supports the following flags:
 
-* `--context`: the context of the kubeconfig to use. **This flag is not
+- `--context`: the context of the kubeconfig to use. **This flag is not
 supported yet and will be silently ignored**.
-* `--kubeconfig`: path to the kubeconfig file to use. **This flag is not
+- `--kubeconfig`: path to the kubeconfig file to use. **This flag is not
 supported yet and will be silently ignored: the default kubeconfig is used**.
-* `--settings-file`: path to settings file to load. This is optional. Take a
+- `--settings-file`: path to settings file to load. This is optional. Take a
 look at `settings.yaml` in this same directory to view an example.
-* `--sdwan.base-url`: sdwan's base url to use when forming requests.
+- `--sdwan.base-url`: sdwan's base url to use when forming requests.
   Must be in the form of `http(s)://<host:port>/path`, e.g.
   `http://example.com:9876/api` or `https://10.11.12.13:1234/my/path`. This is
 **required**, unless this value is provided from file with `--settings-file`.
-* `--watch-all-service-entries, -w`: watch all `ServiceEntry` objects without
+- `--watch-all-service-entries, -w`: watch all `ServiceEntry` objects without
 the need for manual `egress-watch: enabled` label.
 To ignore a service entry you will have to label it as
 `egress-watch: disabled`.
-* `--sdwan.username`: the username for authentication. **Required**.
-* `--sdwan.password`: the password for authentication. **Required**.
-* `--sdwan.insecure`: whether to accept self-signed certificates.
-* `--pretty-logs`: whether to log data in a slower but human readable format.
-* `--verbosity`: to set up the verbosity level. It can be from `0` (most
+- `--sdwan.username`: the username for authentication. **Required**.
+- `--sdwan.password`: the password for authentication. **Required**.
+- `--sdwan.insecure`: whether to accept self-signed certificates.
+- `--pretty-logs`: whether to log data in a slower but human readable format.
+- `--verbosity`: to set up the verbosity level. It can be from `0` (most
 verbose) to `3` (only log important errors). Default is `1`.
-* `--waiting-window`: the duration of the waiting mode. Set this to 0 to
+- `--waiting-window`: the duration of the waiting mode. Set this to 0 to
   disable it entirely. For example, if you set `1m`, Egress Watcher will
   wait one minute for other changes to appear before applying them in
   order to improve performance and do bulk operations. Default is `30s`.

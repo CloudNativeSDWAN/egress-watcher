@@ -20,11 +20,12 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
-	"github.com/davecgh/go-spew/spew"
 	"github.com/rs/zerolog"
 	netv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/util/validation"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -95,7 +96,25 @@ func (n *netPolsEventHandler) Create(ce event.CreateEvent, wq workqueue.RateLimi
 		return
 	}
 
-	spew.Dump(netpol.Spec.Egress)
+	parsedIps := getIps(netpol)
+
+	if len(parsedIps) == 0 {
+		l.Debug().Msg("no valid IPs detected: skipping...")
+		return
+	}
+
+	if len(parsedIps) > 8 {
+		l.Warn().Msg("CIDRs/IP addresses should not be more than 8. Only the first 8 would be selected")
+		parsedIps = parsedIps[0:8]
+	}
+
+	l = l.With().Strs("IPs", parsedIps).Logger()
+
+	n.opsChan <- &sdwan.Operation{
+		Type:            sdwan.OperationAdd,
+		ApplicationName: netpol.Name,
+		Servers:         parsedIps,
+	}
 }
 
 // Generic handles generic events.
@@ -103,4 +122,16 @@ func (n *netPolsEventHandler) Generic(ge event.GenericEvent, wq workqueue.RateLi
 	// We don't really know what to do with generic events.
 	// We will just ignore this.
 	wq.Done(ge.Object)
+}
+
+func getIps(n *netv1.NetworkPolicy) (ips []string) {
+	for _, host := range n.Spec.Egress {
+		for _, ip := range host.To {
+			ipv4Addr, _, _ := net.ParseCIDR(ip.IPBlock.CIDR)
+			if len(validation.IsValidIP(ipv4Addr.String())) == 0 {
+				ips = append(ips, ipv4Addr.String())
+			}
+		}
+	}
+	return ips
 }

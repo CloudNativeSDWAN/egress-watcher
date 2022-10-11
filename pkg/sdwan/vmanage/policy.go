@@ -142,7 +142,7 @@ func (p *policyOps) AddApplication(ctx context.Context, app *policy.ApplicationL
 	return unmarshalIDFromResponseBody(bodyResp, "listId")
 }
 
-func (p *policyOps) CreatePolicyApplicationList(ctx context.Context, customApp *policy.CustomApplication) (string, error) {
+func (p *policyOps) CreatePolicyApplicationList(ctx context.Context, customApp *policy.CustomApplication, customProbe, customProbeType string) (string, error) {
 	// --------------------------------
 	// Application validation
 	// --------------------------------
@@ -170,7 +170,7 @@ func (p *policyOps) CreatePolicyApplicationList(ctx context.Context, customApp *
 	u := url.URL{Path: appsListPolicyPath}
 	reqBody, err := json.Marshal(policy.ApplicationList{
 		Name:        customApp.Name,
-		Description: fmt.Sprintf("Created by egress watcher."),
+		Description: "Created by egress watcher.",
 		Type:        "app",
 		ApplicationEntries: []*policy.ApplicationEntry{
 			{
@@ -179,11 +179,24 @@ func (p *policyOps) CreatePolicyApplicationList(ctx context.Context, customApp *
 			},
 		},
 		Endpoint: &policy.Endpoint{
-			Type:  FQDN,
-			Value: customApp.ServerNames[0],
+			Type: func() string {
+				if customProbeType != "" {
+					return customProbeType
+				}
+
+				return FQDN
+			}(),
+			Value: func() string {
+				if customProbe != "" {
+					return customProbe
+				}
+
+				return customApp.ServerNames[0]
+			}(),
 		},
 		IsCustomApp: true,
 	})
+
 	if err != nil {
 		return "", fmt.Errorf("could not marshal request body: %w", err)
 	}

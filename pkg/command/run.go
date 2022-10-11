@@ -51,6 +51,7 @@ type Options struct {
 	Sdwan                  *sdwan.Options                   `yaml:"sdwan,omitempty"`
 	Verbosity              int                              `yaml:"verbosity"`
 	PrettyLogs             bool                             `yaml:"prettyLogs"`
+	ConsulAddress          string                           `yaml:"consulAddress"`
 }
 
 func getRunCommand() *cobra.Command {
@@ -75,6 +76,7 @@ func getRunCommand() *cobra.Command {
 	var (
 		fileSettingsPath string
 		chosenSdWan      string
+		consulAddress    string
 	)
 
 	// TODO: remove fmt with zerolog in future versions.
@@ -158,6 +160,10 @@ The following controllers are supported:
 				opts.ServiceEntryController.WatchAllServiceEntries = flagOpts.ServiceEntryController.WatchAllServiceEntries
 			}
 
+			if consulAddress != "" {
+				opts.ConsulAddress = consulAddress
+			}
+
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -203,6 +209,9 @@ The following controllers are supported:
 	cmd.Flags().DurationVar(flagOpts.Sdwan.WaitingWindow,
 		"waiting-window", sdwan.DefaultWaitingWindow,
 		"the duration of the waiting mode. Set this to 0 to disable it entirely.")
+	cmd.Flags().StringVar(&consulAddress,
+		"consul-address", "localhost",
+		"address where to reach (and enable) consul")
 
 	return cmd
 }
@@ -269,6 +278,10 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		if err != nil {
 			log.Err(err).Msg("could not get controller")
 			return
+		}
+
+		if opts.ConsulAddress != "" {
+			go controllers.NewConsulPoller(ctx, opts.ConsulAddress, opsChan, log)
 		}
 
 		exitWatch := make(chan struct{})

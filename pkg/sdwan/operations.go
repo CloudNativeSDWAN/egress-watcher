@@ -28,4 +28,6 @@ type Operation struct {
 	Type            OperationType
 	ApplicationName string
 	Servers         []string
+	CustomProbe     string
+	CustomProbeType string
 }

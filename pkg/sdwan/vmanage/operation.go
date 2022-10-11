@@ -364,10 +364,18 @@ func (v *Client) removeApplications(ctx context.Context, ops []*sdwan.Operation,
 func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, log zerolog.Logger) error {
 	names := make([]string, len(ops))
 	customApplications := make([]*policy.CustomApplication, len(ops))
+	customProbes := map[string]string{}
+	customProbeTypes := map[string]string{}
 	for i, op := range ops {
 		customApplications[i] = &policy.CustomApplication{
 			Name:        op.ApplicationName,
 			ServerNames: op.Servers,
+		}
+		if op.CustomProbe != "" {
+			customProbes[op.ApplicationName] = op.CustomProbe
+		}
+		if op.CustomProbeType != "" {
+			customProbeTypes[op.ApplicationName] = op.CustomProbeType
 		}
 		names[i] = op.ApplicationName
 	}
@@ -445,7 +453,7 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 
 		listID, err := v.
 			PolicyApplicationsList().
-			CreatePolicyApplicationList(ctx, customApp)
+			CreatePolicyApplicationList(ctx, customApp, customProbes[customApp.Name], customProbeTypes[customApp.Name])
 		if err != nil {
 			return fmt.Errorf("could not create policy appliction list with name %s: %w", customApp.Name, err)
 		}

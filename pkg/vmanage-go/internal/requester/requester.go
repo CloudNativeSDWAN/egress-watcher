@@ -32,22 +32,38 @@ import (
 )
 
 type Requester struct {
-	baseURL    url.URL
-	httpClient *http.Client
-	tokens     Tokens
+	baseURL       url.URL
+	httpClient    *http.Client
+	tokens        *tokens
+	authenticator *authenticator
 }
 
-type Tokens struct {
+type tokens struct {
 	SessionID string
 	XsrfToken string
 }
 
-func NewRequester(baseURL *url.URL, httpClient *http.Client, tokens Tokens) *Requester {
+type Authentication struct {
+	Username string
+	Password string
+}
+
+func NewRequester(baseURL *url.URL, httpClient *http.Client, auth *Authentication) *Requester {
 	return &Requester{
 		baseURL:    *baseURL,
-		tokens:     tokens,
+		tokens:     &tokens{},
 		httpClient: httpClient,
+		authenticator: &authenticator{
+			username: auth.Username,
+			password: auth.Password,
+		},
 	}
+}
+
+func (r *Requester) Authenticate(ctx context.Context) error {
+	// Using the authenticate function from the authenticator so we can do this
+	// in a thread-safe way.
+	return r.authenticator.authenticate(ctx, r)
 }
 
 func (r *Requester) Do(ctx context.Context, opts ...WithRequestOption) (*http.Response, error) {
@@ -71,11 +87,19 @@ func (r *Requester) Do(ctx context.Context, opts ...WithRequestOption) (*http.Re
 		opt(reqOptions)
 	}
 
+	if reqOptions.reAuth {
+		if err := r.Authenticate(ctx); err != nil {
+			return nil, fmt.Errorf("error while trying to renew session: %w", err)
+		}
+	}
+
 	if _, exists := reqOptions.headers["Content-Type"]; !exists {
 		reqOptions.headers.Add("Content-Type", "application/json")
 	}
 
-	reqOptions.headers.Add(xsrfTokenKey, r.tokens.XsrfToken)
+	if r.tokens.XsrfToken != "" {
+		reqOptions.headers.Add(xsrfTokenKey, r.tokens.XsrfToken)
+	}
 
 	// Make the URL
 	u := r.baseURL
@@ -107,6 +131,23 @@ func (r *Requester) Do(ctx context.Context, opts ...WithRequestOption) (*http.Re
 	bodyResp, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return resp, fmt.Errorf("%w: %s", verrors.ErrorParsingBody, err)
+	}
+
+	// If we received HTML, let's try to detect what that is, maybe it is a
+	// form asking us to re-authenticate?
+	// So let's parse it and make the request again, but this time renew the
+	// session before doing that, **but only** if we aren't authenticating
+	// already! Otherwise this would be an infinite loop.
+	if resp.Header.Get("content-type") != "application/json" &&
+		((reqOptions.path != pathGetSessionID && reqOptions.path != pathGetXsrfToken) &&
+			!reqOptions.reAuth) {
+		if expired, _ := isSessionExpired(bytes.NewReader(bodyResp)); expired {
+			// The session has expired. Let's try to do this again, but
+			// this time we retreive a new session and xsrf token, before
+			// that.
+			opts = append(opts, withReauth())
+			return r.Do(ctx, opts...)
+		}
 	}
 
 	// We close and reset the body because we are going to parse and strip it

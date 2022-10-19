@@ -32,6 +32,7 @@ type RequestOptions struct {
 	headers     http.Header
 	respField   string
 	queryParams url.Values
+	reAuth      bool
 }
 
 type WithRequestOption func(r *RequestOptions)
@@ -105,5 +106,11 @@ func WithQueryParameter(key string, values ...string) WithRequestOption {
 		for _, value := range values {
 			r.queryParams.Add(key, value)
 		}
+	}
+}
+
+func withReauth() WithRequestOption {
+	return func(r *RequestOptions) {
+		r.reAuth = true
 	}
 }

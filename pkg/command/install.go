@@ -36,10 +36,8 @@ func getInstallCommand() *cobra.Command {
 	)
 
 	cmd := &cobra.Command{
-		Use: "install [OPTIONS]",
-		Short: `Install the egress watcher in Kubernetes.
-
-This is an experimental feature.`,
+		Use:   "install [OPTIONS]",
+		Short: `Install the egress watcher in Kubernetes.This is an experimental feature.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home := homedir.HomeDir()
 			if home == "" {
@@ -94,13 +92,35 @@ func install(clientset *kubernetes.Clientset, user, pass, url string) error {
 	usersettingsfilename := "settings.yaml"
 	defaultImage := "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
 
-	createNamespace(clientset, usernamespace)
-	createSecret(clientset, usernamespace, "vmanage-credentials", user, pass)
-	createConfigMap(clientset, usernamespace, "egress-watcher-settings", usersettingsfilename, url, user, pass)
-	createServiceAccount(clientset, usernamespace, "egress-watcher-service-account")
-	createClusterRole(clientset, usernamespace, "egress-watcher-role")
-	createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding")
-	createDeployment(clientset, "new-deployment", usernamespace, defaultImage)
+	if err := createNamespace(clientset, usernamespace); err != nil {
+		fmt.Println("Errored in Step 1/7 creating namespace", err)
+		return fmt.Errorf("Errored in Step 1/7: %w", err)
+	}
+	if err := createSecret(clientset, usernamespace, "vmanage-credentials", user, pass); err != nil {
+		fmt.Println("Errored in Step 2/7 creating secret", err)
+		return fmt.Errorf("Errored in Step 2/7: %w", err)
+	}
+
+	if err := createConfigMap(clientset, usernamespace, "egress-watcher-settings", usersettingsfilename, url, user, pass); err != nil {
+		fmt.Println("Errored in Step 3/7 creating configmap", err)
+		return fmt.Errorf("Errored in Step 3/7: %w", err)
+	}
+	if err := createServiceAccount(clientset, usernamespace, "egress-watcher-service-account"); err != nil {
+		fmt.Println("Errored in Step 4/7 creating serviceaccount", err)
+		return fmt.Errorf("Errored in Step 4/7: %w", err)
+	}
+	if err := createClusterRole(clientset, usernamespace, "egress-watcher-role"); err != nil {
+		fmt.Println("Errored in Step 5/7 creating clustertrole", err)
+		return fmt.Errorf("Errored in Step 5/7: %w", err)
+	}
+	if err := createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding"); err != nil {
+		fmt.Println("Errored in Step 6/7 creating clusterrolebinding", err)
+		return fmt.Errorf("Errored in Step 6/7: %w", err)
+	}
+	if err := createDeployment(clientset, "new-deployment", usernamespace, defaultImage); err != nil {
+		fmt.Println("Errored in Step 7/7 creating namespace", err)
+		return fmt.Errorf("Errored in Step 7/7: %w", err)
+	}
 
 	return nil
 }
@@ -125,13 +145,34 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	usersettingsfilename := "settings.yaml"
 	defaultImage := "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
 
-	createNamespace(clientset, usernamespace)
-	createSecret(clientset, usernamespace, "vmanage-credentials", sdwan_username, sdwan_password)
-	createConfigMap(clientset, usernamespace, "egress-watcher-settings", usersettingsfilename, sdwan_base_url, sdwan_username, sdwan_password)
-	createServiceAccount(clientset, usernamespace, "egress-watcher-service-account")
-	createClusterRole(clientset, usernamespace, "egress-watcher-role")
-	createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding")
-	createDeployment(clientset, "new-deployment", usernamespace, defaultImage)
+	if err := createNamespace(clientset, usernamespace); err != nil {
+		fmt.Println("Errored in Step 1/7", err)
+		return fmt.Errorf("Errored in Step 1/7: %w", err)
+	}
+	if err := createSecret(clientset, usernamespace, "vmanage-credentials", sdwan_username, sdwan_password); err != nil {
+		fmt.Println("Errored in Step 2/7 creating secret", err)
+		return fmt.Errorf("Errored in Step 2/7: %w", err)
+	}
+	if err := createConfigMap(clientset, usernamespace, "egress-watcher-settings", usersettingsfilename, sdwan_base_url, sdwan_username, sdwan_password); err != nil {
+		fmt.Println("Errored in Step 3/7 creating configmap", err)
+		return fmt.Errorf("Errored in Step 3/7: %w", err)
+	}
+	if err := createServiceAccount(clientset, usernamespace, "egress-watcher-service-account"); err != nil {
+		fmt.Println("Errored in Step 4/7 creating serviceaccount", err)
+		return fmt.Errorf("Errored in Step 4/7: %w", err)
+	}
+	if err := createClusterRole(clientset, usernamespace, "egress-watcher-role"); err != nil {
+		fmt.Println("Errored in Step 5/7 creating clustertrole", err)
+		return fmt.Errorf("Errored in Step 5/7: %w", err)
+	}
+	if err := createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding"); err != nil {
+		fmt.Println("Errored in Step 6/7 creating clusterrolebinding", err)
+		return fmt.Errorf("Errored in Step 6/7: %w", err)
+	}
+	if err := createDeployment(clientset, "new-deployment", usernamespace, defaultImage); err != nil {
+		fmt.Println("Errored in Step 7/7 creating deployment", err)
+		return fmt.Errorf("Errored in Step 7/7: %w", err)
+	}
 
 	return nil
 }

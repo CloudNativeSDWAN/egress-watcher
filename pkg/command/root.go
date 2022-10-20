@@ -32,7 +32,7 @@ an SD-WAN controller for processing.`,
 
 	// Commands
 	cmd.AddCommand(getRunCommand())
-        cmd.AddCommand(getInstallCommand()) 
+	cmd.AddCommand(getInstallCommand())
 
 	return cmd
 }

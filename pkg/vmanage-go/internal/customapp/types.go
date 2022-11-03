@@ -64,7 +64,7 @@ func (c *InternalCustomApplication) ToCustomApplication() *ca.CustomApplication 
 		}(),
 		LastUpdated: func() time.Time {
 			// TODO: what if nothing is here? Does this even happen, actually?
-			timestamp, _ := strconv.Atoi(c.LastUpdated)
+			timestamp, _ := strconv.ParseInt(c.LastUpdated, 10, 64)
 			return time.UnixMilli(int64(timestamp))
 		}(),
 		Owner:          c.Owner,
@@ -145,12 +145,12 @@ func parsePortsFromString(ports string) ca.Ports {
 
 		if !strings.Contains(val, "-") {
 			// If this is not a range
-			port, _ := strconv.Atoi(val)
+			port, _ := strconv.ParseInt(val, 10, 32)
 			parsedPorts.Values = append(parsedPorts.Values, int32(port))
 		} else {
 			ranges := strings.Split(val, "-")
-			start, _ := strconv.Atoi(ranges[0])
-			end, _ := strconv.Atoi(ranges[1])
+			start, _ := strconv.ParseInt(ranges[0], 10, 32)
+			end, _ := strconv.ParseInt(ranges[1], 10, 32)
 			parsedPorts.Ranges = append(parsedPorts.Ranges, [2]int32{int32(start), int32(end)})
 		}
 	}

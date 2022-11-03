@@ -63,7 +63,7 @@ func getRunCommand() *cobra.Command {
 			WaitingWindow:  &waitingWindow,
 		},
 	}
-	opts := &Options{
+	fileOpts := &Options{
 		ServiceEntryController: &controllers.ServiceEntryOptions{},
 		// We don't support having authentication in a file because that's
 		// sensitive information.
@@ -84,7 +84,7 @@ func getRunCommand() *cobra.Command {
 		Args: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				fmt.Println(`no sdwan controller defined. Please include -h for a list of supported SD-WAN controllers.`)
-				return fmt.Errorf("no sdwan controller provided.")
+				return fmt.Errorf("no sdwan controller provided")
 			}
 
 			if len(args) > 1 {
@@ -116,46 +116,54 @@ The following controllers are supported:
 				if err != nil {
 					return err
 				}
-				opts = f
+				fileOpts = f
 			}
 
 			if flagOpts.Sdwan.Authentication.Username == "" ||
 				flagOpts.Sdwan.Authentication.Password == "" {
 				return fmt.Errorf("no username or password provided")
 			}
-			opts.Sdwan.Authentication = flagOpts.Sdwan.Authentication
+			fileOpts.Sdwan.Authentication = flagOpts.Sdwan.Authentication
 
 			// -- SD-WAN options
-			if opts.Sdwan != nil {
-				fv := opts.Sdwan
+			if fileOpts.Sdwan != nil {
+				fv := fileOpts.Sdwan
 
 				if fv.BaseURL == "" && flagOpts.Sdwan.BaseURL == "" {
 					return fmt.Errorf("no base url provided")
 				}
 
 				if flagOpts.Sdwan.BaseURL != "" {
-					opts.Sdwan.BaseURL = flagOpts.Sdwan.BaseURL
+					fileOpts.Sdwan.BaseURL = flagOpts.Sdwan.BaseURL
 				}
 
 				if cmd.Flag("waiting-window").Changed {
-					opts.Sdwan.WaitingWindow = flagOpts.Sdwan.WaitingWindow
+					fileOpts.Sdwan.WaitingWindow = flagOpts.Sdwan.WaitingWindow
 				}
 
 				if cmd.Flag("sdwan.insecure").Changed {
-					opts.Sdwan.Insecure = flagOpts.Sdwan.Insecure
+					fileOpts.Sdwan.Insecure = flagOpts.Sdwan.Insecure
 				}
 			}
 
-			if _, err := url.Parse(opts.Sdwan.BaseURL); err != nil {
+			if _, err := url.Parse(fileOpts.Sdwan.BaseURL); err != nil {
 				return fmt.Errorf("invalid base url provided: %w", err)
 			}
 
-			if *opts.Sdwan.WaitingWindow < 0 {
+			if *fileOpts.Sdwan.WaitingWindow < 0 {
 				return fmt.Errorf("invalid waiting window provided")
 			}
 
 			if cmd.Flag("watch-all-service-entries").Changed {
-				opts.ServiceEntryController.WatchAllServiceEntries = flagOpts.ServiceEntryController.WatchAllServiceEntries
+				fileOpts.ServiceEntryController.WatchAllServiceEntries = flagOpts.ServiceEntryController.WatchAllServiceEntries
+			}
+
+			if cmd.Flag("pretty-logs").Changed {
+				fileOpts.PrettyLogs = flagOpts.PrettyLogs
+			}
+
+			if cmd.Flag("verbosity").Changed {
+				fileOpts.Verbosity = flagOpts.Verbosity
 			}
 
 			return nil
@@ -163,9 +171,9 @@ The following controllers are supported:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch chosenSdWan {
 			case "vmanage":
-				return runWithVmanage(kopts, opts)
+				return runWithVmanage(kopts, fileOpts)
 			default:
-				return fmt.Errorf("no sdwan controller provided.")
+				return fmt.Errorf("no sdwan controller provided")
 			}
 		},
 		Example: "run --kubeconfig /my/kubeconf/.conf --watch-all-service-entries",

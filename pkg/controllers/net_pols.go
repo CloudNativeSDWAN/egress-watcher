@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"reflect"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/rs/zerolog"
@@ -39,17 +40,22 @@ const (
 	netPolsCtrlName string = "network-policy-event-handler"
 )
 
+type NetworkPolicyOptions struct {
+	WatchAllNetworkPolicies bool `yaml:"watchAllNetworkPolicies"`
+}
+
 type netPolsEventHandler struct {
+	options *NetworkPolicyOptions
 	opsChan chan *sdwan.Operation
 	log     zerolog.Logger
 }
 
-func NewNetworkPolicyController(mgr manager.Manager, opsChan chan *sdwan.Operation, log zerolog.Logger) (controller.Controller, error) {
+func NewNetworkPolicyController(mgr manager.Manager, options *NetworkPolicyOptions, opsChan chan *sdwan.Operation, log zerolog.Logger) (controller.Controller, error) {
 	if opsChan == nil {
 		return nil, fmt.Errorf("no operations channel provided")
 	}
 
-	npHandler := &netPolsEventHandler{opsChan, log}
+	npHandler := &netPolsEventHandler{options, opsChan, log}
 
 	c, err := controller.New(netPolsCtrlName, mgr, controller.Options{
 		Reconciler: reconcile.Func(func(c context.Context, r reconcile.Request) (reconcile.Result, error) {
@@ -74,7 +80,97 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 	l := n.log.With().Str("event-handler", "Update").Logger()
 	defer wq.Done(ue.ObjectNew)
 
-	l.Info().Msg("updating...")
+	curr, currok := ue.ObjectNew.(*netv1.NetworkPolicy)
+	old, oldok := ue.ObjectOld.(*netv1.NetworkPolicy)
+	if !currok || !oldok {
+		return
+	}
+
+	currParsedIps := getIps(curr)
+	oldParsedIps := getIps(old)
+
+	currIps := map[string]bool{}
+	for _, currIp := range currParsedIps {
+		currIps[currIp] = true
+	}
+
+	oldIps := map[string]bool{}
+	for _, oldIp := range oldParsedIps {
+		oldIps[oldIp] = true
+	}
+
+	if !shouldWatchLabel(curr.Labels, n.options.WatchAllNetworkPolicies) {
+		if !shouldWatchLabel(old.Labels, n.options.WatchAllNetworkPolicies) {
+			return
+		}
+
+		l.Info().Str("reason", "no watch enabled").Msg("sending delete...")
+		n.opsChan <- &sdwan.Operation{
+			Type:            sdwan.OperationRemove,
+			ApplicationName: curr.Name,
+			Servers:         oldParsedIps,
+		}
+		return
+	}
+
+	if n.options.WatchAllNetworkPolicies {
+		l.Info().Str("reason", "change to New IPs from Old IPs").
+			Strs("new-hosts", currParsedIps).
+			Strs("old-hosts", oldParsedIps).
+			Msg("sending update...")
+
+		// First, delete...
+		n.opsChan <- &sdwan.Operation{
+			Type:            sdwan.OperationRemove,
+			ApplicationName: curr.Name,
+			Servers:         oldParsedIps,
+		}
+
+		// ... then, add
+		n.opsChan <- &sdwan.Operation{
+			Type:            sdwan.OperationAdd,
+			ApplicationName: curr.Name,
+			Servers:         currParsedIps,
+		}
+	}
+
+	if len(currParsedIps) == 0 {
+		if len(oldParsedIps) == 0 {
+			return
+		}
+
+		l.Info().Str("reason", "no valid hosts").Msg("sending delete...")
+		n.opsChan <- &sdwan.Operation{
+			Type:            sdwan.OperationRemove,
+			ApplicationName: curr.Name,
+			Servers:         oldParsedIps,
+		}
+
+		return
+	}
+
+	if reflect.DeepEqual(currIps, oldIps) {
+		return
+	}
+
+	l.Info().Str("reason", "different IPs").
+		Strs("new-IPs", currParsedIps).
+		Strs("old-IPs", oldParsedIps).
+		Msg("sending update...")
+
+	// First, delete...
+	n.opsChan <- &sdwan.Operation{
+		Type:            sdwan.OperationRemove,
+		ApplicationName: curr.Name,
+		Servers:         oldParsedIps,
+	}
+
+	// ... then, add
+	n.opsChan <- &sdwan.Operation{
+		Type:            sdwan.OperationAdd,
+		ApplicationName: curr.Name,
+		Servers:         currParsedIps,
+	}
 }
 
 // Delete handles delete events.
@@ -83,6 +179,29 @@ func (n *netPolsEventHandler) Delete(de event.DeleteEvent, wq workqueue.RateLimi
 	defer wq.Done(de.Object)
 
 	l.Info().Msg("deleting...")
+
+	netpol, ok := de.Object.(*netv1.NetworkPolicy)
+	if !ok {
+		l.Error().Msg("could not unmarshal network policy!")
+		return
+	}
+
+	if !shouldWatchLabel(netpol.Labels, n.options.WatchAllNetworkPolicies) {
+		return
+	}
+
+	parsedIps := getIps(netpol)
+
+	if len(parsedIps) == 0 {
+		l.Debug().Msg("no valid IPs detected: skipping...")
+		return
+	}
+
+	n.opsChan <- &sdwan.Operation{
+		Type:            sdwan.OperationRemove,
+		ApplicationName: netpol.Name,
+		Servers:         parsedIps,
+	}
 }
 
 // Create handles create events.

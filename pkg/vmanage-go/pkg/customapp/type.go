@@ -25,13 +25,33 @@ type CustomApplication struct {
 	ID              string
 	Name            string
 	ServerNames     []string
-	L3L4Attributes  *L3L4Attributes
+	L3L4Attributes  L3L4Attributes
 	LastUpdated     time.Time
 	Owner           string
 	SDAVCStatus     string
 	ReferenceCount  int
 	References      []Reference
 	VsmartPolicyIDs []string
+}
+
+func (c *CustomApplication) GetCreateUpdateOptions() CreateUpdateOptions {
+	return CreateUpdateOptions{
+		Name:        c.Name,
+		ServerNames: c.ServerNames,
+		L3L4Attributes: func() L3L4Attributes {
+			attrs := L3L4Attributes{}
+
+			if len(c.L3L4Attributes.TCP) > 0 {
+				attrs.TCP = c.L3L4Attributes.TCP
+			}
+
+			if len(c.L3L4Attributes.UDP) > 0 {
+				attrs.UDP = c.L3L4Attributes.UDP
+			}
+
+			return attrs
+		}(),
+	}
 }
 
 type L3L4Attributes struct {
@@ -63,7 +83,7 @@ const (
 	TCPAndUDP Layer4Protocol = "TCP-UDP"
 )
 
-type CreateOptions struct {
+type CreateUpdateOptions struct {
 	Name           string
 	ServerNames    []string
 	L3L4Attributes L3L4Attributes

@@ -111,7 +111,7 @@ func (c *customApplicationsOps) GetByName(ctx context.Context, name string) (*ca
 	return nil, verrors.ErrorNotFound
 }
 
-func (c *customApplicationsOps) Create(ctx context.Context, opts ca.CreateOptions) (*string, error) {
+func (c *customApplicationsOps) Create(ctx context.Context, opts ca.CreateUpdateOptions) (*string, error) {
 	if opts.Name == "" {
 		return nil, verrors.ErrorNoNameProvided
 	}
@@ -122,7 +122,7 @@ func (c *customApplicationsOps) Create(ctx context.Context, opts ca.CreateOption
 	reqBody, err := json.Marshal(ica.NewInternalCustomApplication(&ca.CustomApplication{
 		Name:           opts.Name,
 		ServerNames:    opts.ServerNames,
-		L3L4Attributes: &opts.L3L4Attributes,
+		L3L4Attributes: opts.L3L4Attributes,
 	}))
 	if err != nil {
 		return nil, fmt.Errorf("%w: %s", verrors.ErrorMarshallingData, err)
@@ -140,6 +140,57 @@ func (c *customApplicationsOps) Create(ctx context.Context, opts ca.CreateOption
 	}
 
 	return &appId, nil
+}
+
+// Update an existing application.
+// Note that empty and nil values will be filled with pre-existing values.
+func (c *customApplicationsOps) Update(ctx context.Context, id string, opts ca.CreateUpdateOptions) error {
+	existingApp, err := c.GetByID(ctx, id)
+	if err != nil {
+		return fmt.Errorf("error while getting custom application with id %s prior to updating: %w", id, err)
+	}
+
+	// Defaults
+	updOpts := existingApp.GetCreateUpdateOptions()
+
+	// Merge with the ones provided
+	// Note: this may need tougher validation, but we're going to let vManage
+	// do it for us.
+	if opts.Name != "" {
+		updOpts.Name = opts.Name
+	}
+	if len(opts.ServerNames) == 0 {
+		updOpts.ServerNames = opts.ServerNames
+	}
+	if opts.L3L4Attributes.TCP != nil {
+		updOpts.L3L4Attributes.TCP = opts.L3L4Attributes.TCP
+	}
+	if opts.L3L4Attributes.UDP == nil {
+		updOpts.L3L4Attributes.UDP = opts.L3L4Attributes.UDP
+	}
+
+	// Make the request
+	reqBody, err := json.Marshal(ica.NewInternalCustomApplication(&ca.CustomApplication{
+		Name:           opts.Name,
+		ServerNames:    opts.ServerNames,
+		L3L4Attributes: opts.L3L4Attributes,
+	}))
+	if err != nil {
+		return fmt.Errorf("%w: %s", verrors.ErrorMarshallingData, err)
+	}
+
+	resp, err := c.Put(ctx, r.WithBodyBytes(reqBody), r.WithPath(id))
+	if err != nil {
+		return err
+	}
+	resp.Body.Close()
+
+	// NOTE: unfortunately vManage returns 200 **always**, even if an error
+	// occurred!
+	// TODO: So we are forced to load the custom app again and check if
+	// values are the same!
+
+	return nil
 }
 
 func (c *customApplicationsOps) Delete(ctx context.Context, id string) error {

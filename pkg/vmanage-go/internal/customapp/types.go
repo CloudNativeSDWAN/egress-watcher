@@ -85,7 +85,7 @@ func (c *InternalCustomApplication) ToCustomApplication() *ca.CustomApplication 
 	}
 }
 
-func parseL3L4(l3l4 []InternalL3L4) *ca.L3L4Attributes {
+func parseL3L4(l3l4 []InternalL3L4) ca.L3L4Attributes {
 	vals := map[ca.Layer4Protocol][]ca.IPsAndPorts{}
 
 	// Group everything under the same protocol.
@@ -122,7 +122,7 @@ func parseL3L4(l3l4 []InternalL3L4) *ca.L3L4Attributes {
 		}
 	}
 
-	parsedAttributes := &ca.L3L4Attributes{}
+	parsedAttributes := ca.L3L4Attributes{}
 	for l4, val := range vals {
 		if l4 == ca.TCP {
 			parsedAttributes.TCP = append(parsedAttributes.TCP, val...)
@@ -160,16 +160,10 @@ func parsePortsFromString(ports string) ca.Ports {
 
 func NewInternalCustomApplication(c *ca.CustomApplication) *InternalCustomApplication {
 	return &InternalCustomApplication{
-		AppID:       c.ID,
-		AppName:     c.Name,
-		ServerNames: c.ServerNames,
-		L3L4Attributes: func() []InternalL3L4 {
-			if c.L3L4Attributes == nil {
-				return []InternalL3L4{}
-			}
-
-			return toInternalL3L4(c.L3L4Attributes)
-		}(),
+		AppID:          c.ID,
+		AppName:        c.Name,
+		ServerNames:    c.ServerNames,
+		L3L4Attributes: toInternalL3L4(c.L3L4Attributes),
 		LastUpdated: func() string {
 			var defaultTime time.Time
 			if c.LastUpdated == defaultTime {
@@ -193,7 +187,7 @@ func NewInternalCustomApplication(c *ca.CustomApplication) *InternalCustomApplic
 	}
 }
 
-func toInternalL3L4(attr *ca.L3L4Attributes) []InternalL3L4 {
+func toInternalL3L4(attr ca.L3L4Attributes) []InternalL3L4 {
 	l3l4 := []InternalL3L4{}
 
 	renderL3L4 := func(ipsPorts ca.IPsAndPorts, l4 ca.Layer4Protocol) InternalL3L4 {

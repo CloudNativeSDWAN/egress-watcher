@@ -106,7 +106,7 @@ func (a *appsListsOps) GetByName(ctx context.Context, name string) (*al.Applicat
 	return nil, verrors.ErrorNotFound
 }
 
-func (a *appsListsOps) Create(ctx context.Context, opts al.CreateOptions) (*string, error) {
+func (a *appsListsOps) Create(ctx context.Context, opts al.CreateUpdateOptions) (*string, error) {
 	// -- First, some validations
 	if opts.Name == "" {
 		return nil, verrors.ErrorNoNameProvided
@@ -153,6 +153,57 @@ func (a *appsListsOps) Create(ctx context.Context, opts al.CreateOptions) (*stri
 	}
 
 	return &listId, nil
+}
+
+func (a *appsListsOps) Update(ctx context.Context, id string, opts al.CreateUpdateOptions) error {
+	existing, err := a.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("error while getting existing custom application list %s prior to update: %w", id, err)
+	}
+
+	// Defaults
+	updOpts := existing.GetCreateUpdateOptions()
+
+	// Merge with the ones provided
+	// Note: this may need tougher validation, but we're going to let vManage
+	// do it for us.
+	if opts.Name != "" {
+		updOpts.Name = opts.Name
+	}
+	if opts.Description != "" {
+		updOpts.Description = opts.Description
+	}
+	if len(opts.Applications) > 0 {
+		updOpts.Applications = opts.Applications
+	}
+	if opts.Probe.Value != "" {
+		updOpts.Probe = opts.Probe
+	}
+
+	// -- Now, do your thing
+	list := &al.ApplicationList{
+		Name:         updOpts.Name,
+		Description:  updOpts.Description,
+		Type:         "app",
+		Applications: updOpts.Applications,
+		Probe:        updOpts.Probe,
+		ListType:     al.Custom,
+	}
+
+	bodyReq, err := json.Marshal(ial.NewInternalApplicationList(list))
+	if err != nil {
+		return fmt.Errorf("%w: %s", verrors.ErrorMarshallingData, err)
+	}
+
+	resp, err := a.Put(ctx,
+		r.WithBodyBytes(bodyReq),
+		r.WithPath(id))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	return nil
 }
 
 func (a *appsListsOps) Delete(ctx context.Context, id string) error {

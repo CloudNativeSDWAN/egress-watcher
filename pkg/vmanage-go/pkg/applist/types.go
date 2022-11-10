@@ -49,6 +49,15 @@ type ApplicationList struct {
 	InfoTag         string
 }
 
+func (a *ApplicationList) GetCreateUpdateOptions() CreateUpdateOptions {
+	return CreateUpdateOptions{
+		Name:         a.Name,
+		Description:  a.Description,
+		Applications: a.Applications,
+		Probe:        a.Probe,
+	}
+}
+
 type Application struct {
 	// Name of the application inside this application list.
 	Name string
@@ -82,7 +91,7 @@ const (
 	Custom   ListType = "custom"
 )
 
-type CreateOptions struct {
+type CreateUpdateOptions struct {
 	Name         string
 	Description  string
 	Applications []Application

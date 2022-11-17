@@ -19,13 +19,28 @@ package command
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
+	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 )
+
+const (
+	usernamespace        = "egress-watcher"
+	usersettingsfilename = "settings.yaml"
+	defaultImage         = "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
+)
+
+var log zerolog.Logger = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
 
 func getInstallCommand() *cobra.Command {
 	var (
@@ -58,13 +73,27 @@ func getInstallCommand() *cobra.Command {
 				return fmt.Errorf("cannot get clientset: %w", err)
 			}
 
-			if interactive {
-				installInteractivelyToK8s(clientset)
-			} else {
-				install(clientset, user, pass, baseurl)
-			}
+			a := 30 * time.Second
+			opt := Options{
+				ServiceEntryController: &controllers.ServiceEntryOptions{
+					WatchAllServiceEntries: false,
+				},
 
-			return nil
+				Sdwan: &sdwan.Options{
+					WaitingWindow: &a,
+					BaseURL:       baseurl,
+					Authentication: &sdwan.Authentication{
+						Username: user,
+						Password: pass,
+					},
+				},
+			}
+			if interactive {
+				return installInteractivelyToK8s(clientset)
+			} else {
+
+				return install(clientset, defaultImage, opt)
+			}
 
 		},
 		Example: "install -i",
@@ -87,92 +116,187 @@ func getInstallCommand() *cobra.Command {
 	return cmd
 }
 
-func install(clientset *kubernetes.Clientset, user, pass, url string) error {
-	usernamespace := "egress-watcher"
-	usersettingsfilename := "settings.yaml"
-	defaultImage := "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
+func install(clientset *kubernetes.Clientset, docker_image string, opt Options) error {
 
+	//TODO: Add a cleanup function
+	log.Info().Msg("Attempting namespace creation")
 	if err := createNamespace(clientset, usernamespace); err != nil {
-		fmt.Println("Errored in Step 1/7 creating namespace", err)
-		return fmt.Errorf("Errored in Step 1/7: %w", err)
-	}
-	if err := createSecret(clientset, usernamespace, "vmanage-credentials", user, pass); err != nil {
-		fmt.Println("Errored in Step 2/7 creating secret", err)
-		return fmt.Errorf("Errored in Step 2/7: %w", err)
+		return err
 	}
 
-	if err := createConfigMap(clientset, usernamespace, "egress-watcher-settings", usersettingsfilename, url, user, pass); err != nil {
-		fmt.Println("Errored in Step 3/7 creating configmap", err)
-		return fmt.Errorf("Errored in Step 3/7: %w", err)
+	log.Info().Msg("Attempting secret creation")
+	if err := createSecret(clientset, usernamespace, "vmanage-credentials", opt); err != nil {
+		return err
 	}
+
+	log.Info().Msg("Attempting configmap creation ")
+	if err := createConfigMap(clientset, opt, usernamespace, "egress-watcher-settings"); err != nil {
+		return err
+	}
+
+	log.Info().Msg("Attempting serviceaccount creation")
 	if err := createServiceAccount(clientset, usernamespace, "egress-watcher-service-account"); err != nil {
-		fmt.Println("Errored in Step 4/7 creating serviceaccount", err)
-		return fmt.Errorf("Errored in Step 4/7: %w", err)
+		return err
 	}
+
+	log.Info().Msg("Attempting clusterrole creation")
 	if err := createClusterRole(clientset, usernamespace, "egress-watcher-role"); err != nil {
-		fmt.Println("Errored in Step 5/7 creating clustertrole", err)
-		return fmt.Errorf("Errored in Step 5/7: %w", err)
+		return err
 	}
+
+	log.Info().Msg("Attempting clusterrolebinding creation")
 	if err := createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding"); err != nil {
-		fmt.Println("Errored in Step 6/7 creating clusterrolebinding", err)
-		return fmt.Errorf("Errored in Step 6/7: %w", err)
+		return err
 	}
-	if err := createDeployment(clientset, "new-deployment", usernamespace, defaultImage); err != nil {
-		fmt.Println("Errored in Step 7/7 creating namespace", err)
-		return fmt.Errorf("Errored in Step 7/7: %w", err)
+
+	log.Info().Msg("Attempting Deployment creation")
+	if err := createDeployment(clientset, "new-deployment", usernamespace, docker_image); err != nil {
+		return err
 	}
 
 	return nil
 }
 
 func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
-	//Take inputs from user
+	//take various inputs from user
+
+	//Username
 	fmt.Println("Hi user , please enter your sdwan username :")
 	var sdwan_username string
 	fmt.Scanln(&sdwan_username)
 
-	// enter password
+	//Password
 	fmt.Println("Please enter your sdwan password :")
-	var sdwan_password string
-	fmt.Scanln(&sdwan_password)
+	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
+	if err != nil {
+		return err
+	}
+	sdwan_password := string(bytePassword)
+	fmt.Printf(sdwan_password)
 
-	//enter base_url
+	//Baseurl
 	fmt.Println("Please enter your sdwan base_url :")
 	var sdwan_base_url string
 	fmt.Scanln(&sdwan_base_url)
 
-	usernamespace := "egress-watcher"
-	usersettingsfilename := "settings.yaml"
-	defaultImage := "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
+	// Waiting time
+	var waittime string
+	var sdwan_waittime time.Duration
+	for {
+		fmt.Println("Please enter the waiting time in h/m/s:")
 
-	if err := createNamespace(clientset, usernamespace); err != nil {
-		fmt.Println("Errored in Step 1/7", err)
-		return fmt.Errorf("Errored in Step 1/7: %w", err)
-	}
-	if err := createSecret(clientset, usernamespace, "vmanage-credentials", sdwan_username, sdwan_password); err != nil {
-		fmt.Println("Errored in Step 2/7 creating secret", err)
-		return fmt.Errorf("Errored in Step 2/7: %w", err)
-	}
-	if err := createConfigMap(clientset, usernamespace, "egress-watcher-settings", usersettingsfilename, sdwan_base_url, sdwan_username, sdwan_password); err != nil {
-		fmt.Println("Errored in Step 3/7 creating configmap", err)
-		return fmt.Errorf("Errored in Step 3/7: %w", err)
-	}
-	if err := createServiceAccount(clientset, usernamespace, "egress-watcher-service-account"); err != nil {
-		fmt.Println("Errored in Step 4/7 creating serviceaccount", err)
-		return fmt.Errorf("Errored in Step 4/7: %w", err)
-	}
-	if err := createClusterRole(clientset, usernamespace, "egress-watcher-role"); err != nil {
-		fmt.Println("Errored in Step 5/7 creating clustertrole", err)
-		return fmt.Errorf("Errored in Step 5/7: %w", err)
-	}
-	if err := createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding"); err != nil {
-		fmt.Println("Errored in Step 6/7 creating clusterrolebinding", err)
-		return fmt.Errorf("Errored in Step 6/7: %w", err)
-	}
-	if err := createDeployment(clientset, "new-deployment", usernamespace, defaultImage); err != nil {
-		fmt.Println("Errored in Step 7/7 creating deployment", err)
-		return fmt.Errorf("Errored in Step 7/7: %w", err)
+		fmt.Scanln(&waittime)
+		sdwan_waittime, err := time.ParseDuration(waittime)
+		_ = sdwan_waittime
+		if err != nil {
+			fmt.Print(err)
+		} else {
+			break
+		}
 	}
 
-	return nil
+	//self signed certificate
+	sdwan_insecure := true
+	for {
+		fmt.Println("Do you want to accept self-signed certificates?[y/n] default[n]")
+
+		var user_input string
+		fmt.Scanln(&user_input)
+
+		if user_input == "y" || user_input == "Y" {
+			sdwan_insecure = false
+			break
+		} else if user_input == "" || user_input == "n" || user_input == "N" {
+			break
+		}
+	}
+
+	// Verbosity
+	fmt.Println("Please enter the verbosity level 0,1,2 :")
+	var sdwan_verbosity int64
+	fmt.Scanln(&sdwan_verbosity)
+
+	// PrettyLogs
+	sdwan_prettylogs := false
+	for {
+		fmt.Println("Do you need pretty logs?[y/n] default[n]")
+
+		var user_input string
+		fmt.Scanln(&user_input)
+
+		if user_input == "y" || user_input == "Y" {
+			sdwan_prettylogs = true
+			break
+		} else if user_input == "" || user_input == "n" || user_input == "N" {
+			break
+		}
+	}
+
+	// Watch all services
+	watchall_serviceentries := false
+	for {
+		fmt.Println("Do you want to watch all the service entries ?[y/n] default[n]")
+
+		var user_input string
+		fmt.Scanln(&user_input)
+
+		if user_input == "y" || user_input == "Y" {
+			watchall_serviceentries = true
+			break
+		} else if user_input == "" || user_input == "n" || user_input == "N" {
+			break
+		}
+	}
+
+	//docker image
+	docker_image := defaultImage
+
+	fmt.Println("If you want to use specific docker image , please type it else press enter default [ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0]")
+	var user_input string
+	fmt.Scanln(&user_input)
+	if user_input != "" {
+		docker_image = user_input
+	}
+
+	var log zerolog.Logger
+	{
+		logLevels := [3]zerolog.Level{
+			zerolog.DebugLevel,
+			zerolog.InfoLevel,
+			zerolog.ErrorLevel,
+		}
+
+		if sdwan_verbosity < 0 || sdwan_verbosity > 2 {
+			fmt.Println("invalid verbosity level provided, using default")
+			sdwan_verbosity = 0
+		}
+
+		if sdwan_prettylogs {
+			log = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
+		} else {
+			log = zerolog.New(os.Stderr).With().Timestamp().Logger()
+		}
+
+		log = log.Level(logLevels[sdwan_verbosity])
+		log.Info().Msg("starting...")
+	}
+
+	opt := Options{
+		ServiceEntryController: &controllers.ServiceEntryOptions{
+			WatchAllServiceEntries: watchall_serviceentries,
+		},
+
+		Sdwan: &sdwan.Options{
+			WaitingWindow: &sdwan_waittime,
+			BaseURL:       sdwan_base_url,
+			Insecure:      sdwan_insecure,
+			Authentication: &sdwan.Authentication{
+				Username: sdwan_username,
+				Password: sdwan_password,
+			},
+		},
+	}
+
+	return install(clientset, docker_image, opt)
+
 }

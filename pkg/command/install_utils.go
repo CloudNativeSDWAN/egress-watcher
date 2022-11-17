@@ -20,10 +20,7 @@ package command
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
-	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
@@ -40,13 +37,12 @@ func createNamespace(clientset *kubernetes.Clientset, usernamespace string) erro
 		},
 	}
 
-	nsOut, err := clientset.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
-	if err != nil {
-
-		return fmt.Errorf("Namespace: error creating the namespace %w", err)
-
+	if nsOut, err := clientset.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{}); err != nil {
+		return err
+	} else {
+		fmt.Printf("Created Namespace %v.\n", nsOut.GetObjectMeta().GetName())
 	}
-	fmt.Printf("Created serviceaccount %v.\n", nsOut.GetObjectMeta().GetName())
+
 	return nil
 }
 
@@ -62,11 +58,11 @@ func createServiceAccount(clientset *kubernetes.Clientset, usernamespace, name s
 		},
 	}
 
-	serviceAccountOut, err := clientset.CoreV1().ServiceAccounts(usernamespace).Create(context.TODO(), servacc, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("ServiceAccount: error creating the serviceaccount %w", err)
+	if serviceAccountOut, err := clientset.CoreV1().ServiceAccounts(usernamespace).Create(context.TODO(), servacc, metav1.CreateOptions{}); err != nil {
+		return err
+	} else {
+		fmt.Printf("Created serviceaccount %v.\n", serviceAccountOut.GetObjectMeta().GetName())
 	}
-	fmt.Printf("Created serviceaccount %v.\n", serviceAccountOut.GetObjectMeta().GetName())
 	return nil
 }
 
@@ -94,12 +90,12 @@ func createClusterRole(clientset *kubernetes.Clientset, usernamespace, name stri
 		},
 	}
 
-	clusterRoleOut, err := clientset.RbacV1().ClusterRoles().Create(context.TODO(), cr, metav1.CreateOptions{})
-
-	if err != nil {
-		return fmt.Errorf("ClusterRole: error creating the clusterrole %w", err)
+	if clusterRoleOut, err := clientset.RbacV1().ClusterRoles().Create(context.TODO(), cr, metav1.CreateOptions{}); err != nil {
+		return err
+	} else {
+		fmt.Printf("Created clusterRole %v.\n", clusterRoleOut.GetObjectMeta().GetName())
 	}
-	fmt.Printf("Created clusterRole %v.\n", clusterRoleOut.GetObjectMeta().GetName())
+
 	return nil
 }
 
@@ -127,31 +123,16 @@ func createClusterRoleBinding(clientset *kubernetes.Clientset, usernamespace, na
 		},
 	}
 
-	clusterRoleBindingOut, err := clientset.RbacV1().ClusterRoleBindings().Create(context.TODO(), crb, metav1.CreateOptions{})
-
-	if err != nil {
-		return fmt.Errorf("ClusterRoleBinding: error creating the clusterrolebinding %w", err)
+	if clusterRoleBindingOut, err := clientset.RbacV1().ClusterRoleBindings().Create(context.TODO(), crb, metav1.CreateOptions{}); err != nil {
+		return err
+	} else {
+		fmt.Printf("Created clusterRoleBindingccount %v.\n", clusterRoleBindingOut.GetObjectMeta().GetName())
 	}
-	fmt.Printf("Created clusterRoleBindingccount %v.\n", clusterRoleBindingOut.GetObjectMeta().GetName())
 	return nil
 }
 
-func createConfigMap(clientset *kubernetes.Clientset, usernamespace, name, usersettingsfilename, sdwan_url, sdwan_username, sdwan_pass string) error {
-	defWindow := 30 * time.Second
-	opt := Options{
-		ServiceEntryController: &controllers.ServiceEntryOptions{
-			WatchAllServiceEntries: false,
-		},
+func createConfigMap(clientset *kubernetes.Clientset, opt Options, usernamespace, name string) error {
 
-		Sdwan: &sdwan.Options{
-			WaitingWindow: &defWindow,
-			BaseURL:       sdwan_url,
-			Authentication: &sdwan.Authentication{
-				Username: sdwan_username,
-				Password: sdwan_pass,
-			},
-		},
-	}
 	yaml_opt, _ := yaml.Marshal(opt)
 	cm := apiv1.ConfigMap{
 		TypeMeta: metav1.TypeMeta{
@@ -168,38 +149,36 @@ func createConfigMap(clientset *kubernetes.Clientset, usernamespace, name, users
 		},
 	}
 
-	configOut, err := clientset.CoreV1().ConfigMaps(usernamespace).Create(context.TODO(), &cm, metav1.CreateOptions{})
-
-	if err != nil {
-		return fmt.Errorf("ConfigMap: error creating the configmap %w", err)
+	if configOut, err := clientset.CoreV1().ConfigMaps(usernamespace).Create(context.TODO(), &cm, metav1.CreateOptions{}); err != nil {
+		return err
+	} else {
+		fmt.Printf("Created configmap %v.\n", configOut.GetObjectMeta().GetName())
 	}
-	fmt.Printf("Created configmap %v.\n", configOut.GetObjectMeta().GetName())
 	return nil
 }
 
-func createSecret(clientset *kubernetes.Clientset, usernamespace, name, sdwan_username, sdwan_pass string) error {
+func createSecret(clientset *kubernetes.Clientset, usernamespace, name string, opt Options) error {
 	secr := &apiv1.Secret{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "Secret",
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "vmanage-credentials",
+			Name:      name,
 			Namespace: usernamespace,
 		},
 		Data: map[string][]byte{
-			"username": []byte(sdwan_username),
-			"password": []byte(sdwan_pass),
+			"username": []byte(opt.Sdwan.Authentication.Username),
+			"password": []byte(opt.Sdwan.Authentication.Password),
 		},
 		Type: "Opaque",
 	}
 
-	secretOut, err := clientset.CoreV1().Secrets(usernamespace).Create(context.TODO(), secr, metav1.CreateOptions{})
-
-	if err != nil {
-		return fmt.Errorf("Secret: error creating the secret %w", err)
+	if secretOut, err := clientset.CoreV1().Secrets(usernamespace).Create(context.TODO(), secr, metav1.CreateOptions{}); err != nil {
+		return err
+	} else {
+		fmt.Printf("Created secret %v.\n", secretOut.GetObjectMeta().GetName())
 	}
-	fmt.Printf("Created secret %v.\n", secretOut.GetObjectMeta().GetName())
 	return nil
 }
 
@@ -209,7 +188,7 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "egress-watcher",
-			Namespace: "egress-watcher",
+			Namespace: usernamespace,
 			Labels: map[string]string{
 				"app": "egress-watcher"},
 		},
@@ -299,13 +278,11 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 	}
 
 	// Create Deployment
-	fmt.Println("Creating deployment...")
-	result, err := deploymentsClient.Create(context.TODO(), deployment, metav1.CreateOptions{})
-	if err != nil {
-		//panic(err)
-		return fmt.Errorf("Deployment: error creating the deployment %w", err)
+	if result, err := deploymentsClient.Create(context.TODO(), deployment, metav1.CreateOptions{}); err != nil {
+		return err
+	} else {
+		fmt.Printf("Created deployment %q.\n", result.GetObjectMeta().GetName())
 	}
-	fmt.Printf("Created deployment %q.\n", result.GetObjectMeta().GetName())
 	return nil
 
 }

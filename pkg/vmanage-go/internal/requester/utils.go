@@ -18,10 +18,17 @@
 package requester
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
+)
+
+const (
+	coolDownDuration   time.Duration = 5 * time.Second
+	defaultMaxAttempts int           = 5
 )
 
 func isSessionExpired(reader io.Reader) (bool, error) {
@@ -32,4 +39,36 @@ func isSessionExpired(reader io.Reader) (bool, error) {
 
 	return doc.FindMatcher(goquery.Single("body")).
 		ChildrenMatcher(goquery.Single("div.loginContainer")).Length() == 1, nil
+}
+
+func isVmanageUnavailable(reader io.Reader) (bool, error) {
+	const unavText = "vManage Server is not ready or temporarily unavailable"
+
+	doc, err := goquery.NewDocumentFromReader(reader)
+	if err != nil {
+		return false, fmt.Errorf("cannot open HTML document: %w", err)
+	}
+
+	// NOTE! As of now, the *only* way to see if vManage is unavailable is to
+	// look for an image which contains a particular text.
+	// We have no other way  ¯\_(ツ)_/¯
+	data := doc.FindMatcher(goquery.Single("div.loginInnerContainer")).
+		ChildrenMatcher(goquery.Single("img"))
+
+	if data.Length() == 0 {
+		return false, nil
+	}
+
+	alt, _ := data.Attr("alt")
+	return alt == unavText, nil
+}
+
+func coolDown(ctx context.Context) error {
+	timer := time.NewTimer(coolDownDuration)
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

@@ -77,10 +77,11 @@ func (r *Requester) Do(ctx context.Context, opts ...WithRequestOption) (*http.Re
 	// ----------------------------------
 
 	reqOptions := &RequestOptions{
-		method:    http.MethodGet,
-		body:      http.NoBody,
-		headers:   http.Header{},
-		respField: "data",
+		method:      http.MethodGet,
+		body:        http.NoBody,
+		headers:     http.Header{},
+		respField:   "data",
+		maxAttempts: defaultMaxAttempts,
 	}
 
 	for _, opt := range opts {
@@ -148,6 +149,21 @@ func (r *Requester) Do(ctx context.Context, opts ...WithRequestOption) (*http.Re
 			// this time we retreive a new session and xsrf token, before
 			// that.
 			opts = append(opts, withReauth())
+			return r.Do(ctx, opts...)
+		}
+
+		if unavailable, _ := isVmanageUnavailable(bodyReader); unavailable {
+			if reqOptions.currAttempt == reqOptions.maxAttempts {
+				resp.Body = io.NopCloser(bodyReader)
+				return resp, verrors.ErrorTooManyFailedAttempts
+			}
+
+			// vManage looks unavailable, let's retry later.
+			if err := coolDown(ctx); err != nil {
+				return resp, err
+			}
+
+			opts = append(opts, withIncreaseAttempt())
 			return r.Do(ctx, opts...)
 		}
 	}

@@ -37,6 +37,8 @@ var (
 	ErrorNoApplicationsProvided         error = fmt.Errorf("no applications provided")
 	ErrorInvalidProbeType               error = fmt.Errorf("invalid probe type provided")
 	ErrorInvalidProbeValue              error = fmt.Errorf("invalid probe value provided")
+	ErrorVmanageUnavailable             error = fmt.Errorf("vManage Server is not ready or temporarily unavailable")
+	ErrorTooManyFailedAttempts          error = fmt.Errorf("too many failed attempts")
 )
 
 type VmanageError struct {

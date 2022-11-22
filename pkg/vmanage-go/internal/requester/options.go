@@ -33,6 +33,8 @@ type RequestOptions struct {
 	respField   string
 	queryParams url.Values
 	reAuth      bool
+	maxAttempts int
+	currAttempt int
 }
 
 type WithRequestOption func(r *RequestOptions)
@@ -112,5 +114,17 @@ func WithQueryParameter(key string, values ...string) WithRequestOption {
 func withReauth() WithRequestOption {
 	return func(r *RequestOptions) {
 		r.reAuth = true
+	}
+}
+
+func WithNoRetry() WithRequestOption {
+	return func(r *RequestOptions) {
+		r.maxAttempts = 0
+	}
+}
+
+func withIncreaseAttempt() WithRequestOption {
+	return func(r *RequestOptions) {
+		r.currAttempt++
 	}
 }

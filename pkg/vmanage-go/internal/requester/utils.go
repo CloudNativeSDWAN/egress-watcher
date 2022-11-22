@@ -18,63 +18,11 @@
 package requester
 
 import (
-	"context"
 	"fmt"
 	"io"
-	"strings"
 
-	verrors "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/errors"
 	"github.com/PuerkitoBio/goquery"
 )
-
-const (
-	pathGetSessionID string = "j_security_check"
-	pathGetXsrfToken string = "dataservice/client/token"
-)
-
-func getSessionID(ctx context.Context, req *Requester, username, password string) (*string, error) {
-	const (
-		cookieSessionIDKey string = "JSESSIONID"
-		authBody           string = "j_username=%s&j_password=%s"
-	)
-	body := strings.NewReader(fmt.Sprintf(authBody, username, password))
-
-	resp, err := req.Post(context.Background(),
-		WithBodyReader(body),
-		WithPath(pathGetSessionID),
-		WithHeader("Content-Type", "application/x-www-form-urlencoded"),
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, cookie := range resp.Cookies() {
-		if cookie.Name == cookieSessionIDKey {
-			return &cookie.Value, nil
-		}
-	}
-	return nil, verrors.ErrorCookieSessionIDNotFound
-}
-
-func getXSRFToken(ctx context.Context, req *Requester) (*string, error) {
-	resp, err := req.Do(context.Background(), WithPath(pathGetXsrfToken))
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	token := ""
-	{
-		_token, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %s", verrors.ErrorParsingBody, err)
-		}
-
-		token = string(_token)
-	}
-
-	return &token, nil
-}
 
 func isSessionExpired(reader io.Reader) (bool, error) {
 	doc, err := goquery.NewDocumentFromReader(reader)

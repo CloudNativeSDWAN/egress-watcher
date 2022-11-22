@@ -136,12 +136,14 @@ func (r *Requester) Do(ctx context.Context, opts ...WithRequestOption) (*http.Re
 	// If we received HTML, let's try to detect what that is, maybe it is a
 	// form asking us to re-authenticate?
 	// So let's parse it and make the request again, but this time renew the
-	// session before doing that, **but only** if we aren't authenticating
-	// already! Otherwise this would be an infinite loop.
+	// session before doing that, **but only** if we haven't already just done
+	// that.
 	if resp.Header.Get("content-type") != "application/json" &&
-		((reqOptions.path != pathGetSessionID && reqOptions.path != pathGetXsrfToken) &&
-			!reqOptions.reAuth) {
-		if expired, _ := isSessionExpired(bytes.NewReader(bodyResp)); expired {
+		!reqOptions.reAuth {
+
+		bodyReader := bytes.NewReader(bodyResp)
+
+		if expired, _ := isSessionExpired(bodyReader); expired {
 			// The session has expired. Let's try to do this again, but
 			// this time we retreive a new session and xsrf token, before
 			// that.

@@ -24,11 +24,13 @@ import (
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 )
 
-func NewManager() (manager.Manager, error) {
+func NewManager(kubeconfigPath string) (manager.Manager, error) {
 	scheme := k8sruntime.NewScheme()
 	if err := clientgoscheme.AddToScheme(scheme); err != nil {
 		return nil, fmt.Errorf("could not add to scheme: %w", err)
@@ -37,7 +39,13 @@ func NewManager() (manager.Manager, error) {
 		return nil, fmt.Errorf("could not add scheme to networking: %w", err)
 	}
 
-	cfg, err := config.GetConfig()
+	cfg, err := func() (*rest.Config, error) {
+		if kubeconfigPath == "" {
+			return config.GetConfig()
+		}
+
+		return clientcmd.BuildConfigFromFlags("", kubeconfigPath)
+	}()
 	if err != nil {
 		return nil, fmt.Errorf("could not get config: %w", err)
 	}

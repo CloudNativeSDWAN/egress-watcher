@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -118,41 +119,93 @@ func getInstallCommand() *cobra.Command {
 
 func install(clientset *kubernetes.Clientset, docker_image string, opt Options) error {
 
-	//TODO: Add a cleanup function
-	log.Info().Msg("Attempting namespace creation")
-	if err := createNamespace(clientset, usernamespace); err != nil {
-		return err
+	type deletecomponent int
+
+	const (
+		clusterrole deletecomponent = iota
+		clusterrolebinding
+		namespace
+	)
+
+	logLevels := [3]zerolog.Level{
+		zerolog.DebugLevel,
+		zerolog.InfoLevel,
+		zerolog.ErrorLevel,
 	}
 
-	log.Info().Msg("Attempting secret creation")
-	if err := createSecret(clientset, usernamespace, "vmanage-credentials", opt); err != nil {
-		return err
+	if opt.PrettyLogs {
+		log = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
+	} else {
+		log = zerolog.New(os.Stderr).With().Timestamp().Logger()
 	}
-
-	log.Info().Msg("Attempting configmap creation ")
-	if err := createConfigMap(clientset, opt, usernamespace, "egress-watcher-settings"); err != nil {
-		return err
-	}
-
-	log.Info().Msg("Attempting serviceaccount creation")
-	if err := createServiceAccount(clientset, usernamespace, "egress-watcher-service-account"); err != nil {
-		return err
-	}
+	log = log.Level(logLevels[opt.Verbosity])
+	log.Info().Msg("Starting...")
 
 	log.Info().Msg("Attempting clusterrole creation")
 	if err := createClusterRole(clientset, usernamespace, "egress-watcher-role"); err != nil {
 		return err
 	}
+	log.Info().Msg("ClusterRole created successfully")
 
 	log.Info().Msg("Attempting clusterrolebinding creation")
 	if err := createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding"); err != nil {
+		outputerr := cleanUP(clientset, 0)
+		if outputerr != nil {
+			log.Info().Msg("Could not delete a created resource")
+		}
 		return err
 	}
+	log.Info().Msg("ClusterRoleBinding created successfully")
+
+	log.Info().Msg("Attempting namespace creation")
+	if err := createNamespace(clientset, usernamespace); err != nil {
+		outputerr := cleanUP(clientset, 1)
+		if outputerr != nil {
+			log.Err(outputerr).Msg("Could not delete a created resource")
+		}
+		return err
+	}
+	log.Info().Msg("Namespace created successfully")
+
+	log.Info().Msg("Attempting secret creation")
+	if err := createSecret(clientset, usernamespace, "vmanage-credentials", opt); err != nil {
+		outputerr := cleanUP(clientset, 2)
+		if outputerr != nil {
+			log.Info().Msg("Could not delete a created resources")
+		}
+		return err
+	}
+	log.Info().Msg("Secret created successfully")
+
+	log.Info().Msg("Attempting configmap creation ")
+	if err := createConfigMap(clientset, opt, usernamespace, "egress-watcher-settings"); err != nil {
+		outputerr := cleanUP(clientset, 2)
+		if outputerr != nil {
+			log.Info().Msg("Could not delete a created resource")
+		}
+		return err
+	}
+	log.Info().Msg("ConfigMap created successfully")
+
+	log.Info().Msg("Attempting serviceaccount creation")
+	if err := createServiceAccount(clientset, usernamespace, "egress-watcher-service-account"); err != nil {
+		outputerr := cleanUP(clientset, 2)
+		if outputerr != nil {
+			log.Info().Msg("Could not delete a created resource")
+		}
+		return err
+	}
+	log.Info().Msg("ServiceAccount created successfully")
 
 	log.Info().Msg("Attempting Deployment creation")
 	if err := createDeployment(clientset, "new-deployment", usernamespace, docker_image); err != nil {
+		outputerr := cleanUP(clientset, 2)
+		if outputerr != nil {
+			log.Info().Msg("Could not delete a created resource")
+		}
 		return err
 	}
+	log.Info().Msg("Deployment created successfully")
 
 	return nil
 }
@@ -172,7 +225,6 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 		return err
 	}
 	sdwan_password := string(bytePassword)
-	fmt.Printf(sdwan_password)
 
 	//Baseurl
 	fmt.Println("Please enter your sdwan base_url :")
@@ -186,8 +238,7 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 		fmt.Println("Please enter the waiting time in h/m/s:")
 
 		fmt.Scanln(&waittime)
-		sdwan_waittime, err := time.ParseDuration(waittime)
-		_ = sdwan_waittime
+		sdwan_waittime, err = time.ParseDuration(waittime)
 		if err != nil {
 			fmt.Print(err)
 		} else {
@@ -197,54 +248,69 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 
 	//self signed certificate
 	sdwan_insecure := true
+selfSignedCertificate:
 	for {
 		fmt.Println("Do you want to accept self-signed certificates?[y/n] default[n]")
 
 		var user_input string
 		fmt.Scanln(&user_input)
 
-		if user_input == "y" || user_input == "Y" {
+		switch strings.ToLower(user_input) {
+		case "y":
 			sdwan_insecure = false
-			break
-		} else if user_input == "" || user_input == "n" || user_input == "N" {
-			break
+			break selfSignedCertificate
+		case "", "n":
+			break selfSignedCertificate
+
 		}
+
 	}
 
 	// Verbosity
 	fmt.Println("Please enter the verbosity level 0,1,2 :")
-	var sdwan_verbosity int64
+	var sdwan_verbosity int
 	fmt.Scanln(&sdwan_verbosity)
+
+	if sdwan_verbosity < 0 || sdwan_verbosity > 2 {
+		fmt.Println("invalid verbosity level provided, using default")
+		sdwan_verbosity = 0
+	}
 
 	// PrettyLogs
 	sdwan_prettylogs := false
+prettyLogsInput:
 	for {
 		fmt.Println("Do you need pretty logs?[y/n] default[n]")
 
 		var user_input string
 		fmt.Scanln(&user_input)
 
-		if user_input == "y" || user_input == "Y" {
+		switch strings.ToLower(user_input) {
+		case "y":
 			sdwan_prettylogs = true
-			break
-		} else if user_input == "" || user_input == "n" || user_input == "N" {
-			break
+			break prettyLogsInput
+		case "", "n":
+			break prettyLogsInput
+
 		}
 	}
 
 	// Watch all services
 	watchall_serviceentries := false
+watchAllServicesInput:
 	for {
 		fmt.Println("Do you want to watch all the service entries ?[y/n] default[n]")
 
 		var user_input string
 		fmt.Scanln(&user_input)
 
-		if user_input == "y" || user_input == "Y" {
+		switch strings.ToLower(user_input) {
+		case "y":
 			watchall_serviceentries = true
-			break
-		} else if user_input == "" || user_input == "n" || user_input == "N" {
-			break
+			break watchAllServicesInput
+		case "", "n":
+			break watchAllServicesInput
+
 		}
 	}
 
@@ -256,29 +322,6 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	fmt.Scanln(&user_input)
 	if user_input != "" {
 		docker_image = user_input
-	}
-
-	var log zerolog.Logger
-	{
-		logLevels := [3]zerolog.Level{
-			zerolog.DebugLevel,
-			zerolog.InfoLevel,
-			zerolog.ErrorLevel,
-		}
-
-		if sdwan_verbosity < 0 || sdwan_verbosity > 2 {
-			fmt.Println("invalid verbosity level provided, using default")
-			sdwan_verbosity = 0
-		}
-
-		if sdwan_prettylogs {
-			log = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
-		} else {
-			log = zerolog.New(os.Stderr).With().Timestamp().Logger()
-		}
-
-		log = log.Level(logLevels[sdwan_verbosity])
-		log.Info().Msg("starting...")
 	}
 
 	opt := Options{
@@ -295,6 +338,8 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 				Password: sdwan_password,
 			},
 		},
+		PrettyLogs: sdwan_prettylogs,
+		Verbosity:  sdwan_verbosity,
 	}
 
 	return install(clientset, docker_image, opt)

@@ -113,27 +113,6 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 		return
 	}
 
-	if n.options.WatchAllNetworkPolicies {
-		l.Info().Str("reason", "change to New IPs from Old IPs").
-			Strs("new-hosts", currParsedIps).
-			Strs("old-hosts", oldParsedIps).
-			Msg("sending update...")
-
-		// First, delete...
-		n.opsChan <- &sdwan.Operation{
-			Type:            sdwan.OperationRemove,
-			ApplicationName: curr.Name,
-			Servers:         oldParsedIps,
-		}
-
-		// ... then, add
-		n.opsChan <- &sdwan.Operation{
-			Type:            sdwan.OperationAdd,
-			ApplicationName: curr.Name,
-			Servers:         currParsedIps,
-		}
-	}
-
 	if len(currParsedIps) == 0 {
 		if len(oldParsedIps) == 0 {
 			return

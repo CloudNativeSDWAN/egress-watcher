@@ -19,7 +19,6 @@ package command
 
 import (
 	"context"
-	"fmt"
 
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
@@ -36,14 +35,9 @@ func createNamespace(clientset *kubernetes.Clientset, usernamespace string) erro
 			Name: usernamespace,
 		},
 	}
+	_, err := clientset.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
+	return err
 
-	if nsOut, err := clientset.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{}); err != nil {
-		return err
-	} else {
-		fmt.Printf("Created Namespace %v.\n", nsOut.GetObjectMeta().GetName())
-	}
-
-	return nil
 }
 
 func createServiceAccount(clientset *kubernetes.Clientset, usernamespace, name string) error {
@@ -58,12 +52,9 @@ func createServiceAccount(clientset *kubernetes.Clientset, usernamespace, name s
 		},
 	}
 
-	if serviceAccountOut, err := clientset.CoreV1().ServiceAccounts(usernamespace).Create(context.TODO(), servacc, metav1.CreateOptions{}); err != nil {
-		return err
-	} else {
-		fmt.Printf("Created serviceaccount %v.\n", serviceAccountOut.GetObjectMeta().GetName())
-	}
-	return nil
+	_, err := clientset.CoreV1().ServiceAccounts(usernamespace).Create(context.TODO(), servacc, metav1.CreateOptions{})
+	return err
+
 }
 
 func createClusterRole(clientset *kubernetes.Clientset, usernamespace, name string) error {
@@ -90,13 +81,9 @@ func createClusterRole(clientset *kubernetes.Clientset, usernamespace, name stri
 		},
 	}
 
-	if clusterRoleOut, err := clientset.RbacV1().ClusterRoles().Create(context.TODO(), cr, metav1.CreateOptions{}); err != nil {
-		return err
-	} else {
-		fmt.Printf("Created clusterRole %v.\n", clusterRoleOut.GetObjectMeta().GetName())
-	}
+	_, err := clientset.RbacV1().ClusterRoles().Create(context.TODO(), cr, metav1.CreateOptions{})
+	return err
 
-	return nil
 }
 
 func createClusterRoleBinding(clientset *kubernetes.Clientset, usernamespace, name string) error {
@@ -123,12 +110,9 @@ func createClusterRoleBinding(clientset *kubernetes.Clientset, usernamespace, na
 		},
 	}
 
-	if clusterRoleBindingOut, err := clientset.RbacV1().ClusterRoleBindings().Create(context.TODO(), crb, metav1.CreateOptions{}); err != nil {
-		return err
-	} else {
-		fmt.Printf("Created clusterRoleBindingccount %v.\n", clusterRoleBindingOut.GetObjectMeta().GetName())
-	}
-	return nil
+	_, err := clientset.RbacV1().ClusterRoleBindings().Create(context.TODO(), crb, metav1.CreateOptions{})
+	return err
+
 }
 
 func createConfigMap(clientset *kubernetes.Clientset, opt Options, usernamespace, name string) error {
@@ -149,12 +133,9 @@ func createConfigMap(clientset *kubernetes.Clientset, opt Options, usernamespace
 		},
 	}
 
-	if configOut, err := clientset.CoreV1().ConfigMaps(usernamespace).Create(context.TODO(), &cm, metav1.CreateOptions{}); err != nil {
-		return err
-	} else {
-		fmt.Printf("Created configmap %v.\n", configOut.GetObjectMeta().GetName())
-	}
-	return nil
+	_, err := clientset.CoreV1().ConfigMaps(usernamespace).Create(context.TODO(), &cm, metav1.CreateOptions{})
+	return err
+
 }
 
 func createSecret(clientset *kubernetes.Clientset, usernamespace, name string, opt Options) error {
@@ -174,12 +155,9 @@ func createSecret(clientset *kubernetes.Clientset, usernamespace, name string, o
 		Type: "Opaque",
 	}
 
-	if secretOut, err := clientset.CoreV1().Secrets(usernamespace).Create(context.TODO(), secr, metav1.CreateOptions{}); err != nil {
-		return err
-	} else {
-		fmt.Printf("Created secret %v.\n", secretOut.GetObjectMeta().GetName())
-	}
-	return nil
+	_, err := clientset.CoreV1().Secrets(usernamespace).Create(context.TODO(), secr, metav1.CreateOptions{})
+	return err
+
 }
 
 func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernamespace string, image string) error {
@@ -278,11 +256,39 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 	}
 
 	// Create Deployment
-	if result, err := deploymentsClient.Create(context.TODO(), deployment, metav1.CreateOptions{}); err != nil {
-		return err
-	} else {
-		fmt.Printf("Created deployment %q.\n", result.GetObjectMeta().GetName())
-	}
-	return nil
+	_, err := deploymentsClient.Create(context.TODO(), deployment, metav1.CreateOptions{})
+	return err
 
+}
+
+func cleanUP(clientset *kubernetes.Clientset, objecttype int) error {
+
+	for i := 0; i <= objecttype; {
+
+		switch i {
+
+		case 0:
+			err := clientset.RbacV1().ClusterRoles().Delete(context.TODO(), "egress-watcher-role", metav1.DeleteOptions{})
+			if err != nil {
+				return err
+			}
+
+		case 1:
+			err := clientset.RbacV1().ClusterRoleBindings().Delete(context.TODO(), "egress-watcher-role-binding", metav1.DeleteOptions{})
+			if err != nil {
+				return err
+			}
+			break
+
+		case 2:
+			err := clientset.CoreV1().Namespaces().Delete(context.TODO(), "egress-watcher", metav1.DeleteOptions{})
+			if err != nil {
+				return err
+			}
+			break
+		}
+		i++
+	}
+
+	return nil
 }

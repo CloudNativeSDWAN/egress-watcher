@@ -4,13 +4,13 @@ go 1.18
 
 require (
 	github.com/rs/zerolog v1.28.0
-	github.com/spf13/cobra v1.6.0
+	github.com/spf13/cobra v1.6.1
 	gopkg.in/yaml.v3 v3.0.1
-	istio.io/api v0.0.0-20221005164339-97dc20dc0ff3
-	istio.io/client-go v1.15.2
-	k8s.io/apimachinery v0.25.3
-	k8s.io/client-go v0.25.3
-	sigs.k8s.io/controller-runtime v0.13.0
+	istio.io/api v0.0.0-20221109202042-b9e5d446a83d
+	istio.io/client-go v1.16.0
+	k8s.io/apimachinery v0.25.4
+	k8s.io/client-go v0.25.4
+	sigs.k8s.io/controller-runtime v0.13.1
 )
 
 require (
@@ -71,7 +71,7 @@ require (
 	google.golang.org/protobuf v1.28.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
-	k8s.io/api v0.25.3 // indirect
+	k8s.io/api v0.25.4 // indirect
 	k8s.io/component-base v0.25.0 // indirect
 	k8s.io/klog/v2 v2.70.1 // indirect
 	k8s.io/kube-openapi v0.0.0-20220803162953-67bda5d908f1 // indirect

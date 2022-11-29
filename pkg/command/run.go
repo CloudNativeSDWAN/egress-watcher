@@ -34,6 +34,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/homedir"
 )
 
@@ -54,6 +55,11 @@ type Options struct {
 }
 
 func getRunCommand() *cobra.Command {
+	insideCluster := false
+	if _, err := rest.InClusterConfig(); err == nil {
+		insideCluster = true
+	}
+
 	kopts := &kubeConfigOptions{}
 	waitingWindow := sdwan.DefaultWaitingWindow
 	flagOpts := &Options{
@@ -111,6 +117,11 @@ The following controllers are supported:
   You can run the program against vManage by using "vmanage" (or "with-vmanage") as
   first argument.`,
 		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			if insideCluster && kopts.path != "" {
+				return fmt.Errorf("using a different kubeconfig when running " +
+					"inside the cluster is not suppported")
+			}
+
 			if fileSettingsPath != "" {
 				f, err := getSettingsFromFile(fileSettingsPath)
 				if err != nil {
@@ -176,18 +187,18 @@ The following controllers are supported:
 				return fmt.Errorf("no sdwan controller provided")
 			}
 		},
-		Example: "run --kubeconfig /my/kubeconf/.conf --watch-all-service-entries",
+		Example: "run --kubeconfig /my/kubeconf/conf --watch-all-service-entries",
 	}
 
 	// Flags
 	cmd.Flags().StringVar(&kopts.path, "kubeconfig", func() string {
-		if home := homedir.HomeDir(); len(home) > 0 {
+		if home := homedir.HomeDir(); len(home) > 0 && !insideCluster {
 			return path.Join(home, ".kube", "config")
 		}
 
 		return ""
-	}(), "path to the kubeconfig file to use.")
-	cmd.Flags().StringVar(&kopts.context, "context", "", "the context to use.")
+	}(), "path to the kubeconfig file to use. "+
+		"This is only used when running outside of the cluster.")
 	cmd.Flags().BoolVarP(&flagOpts.ServiceEntryController.WatchAllServiceEntries,
 		"watch-all-service-entries", "w", false,
 		"whether to watch all service entries by default.")
@@ -239,7 +250,7 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		log.Info().Msg("starting...")
 	}
 
-	mgr, err := controllers.NewManager()
+	mgr, err := controllers.NewManager(kopts.path)
 	if err != nil {
 		return fmt.Errorf("could not get manager: %w", err)
 	}

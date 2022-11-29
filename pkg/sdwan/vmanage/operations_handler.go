@@ -62,10 +62,72 @@ func NewOperationsHandler(client *vmanagego.Client, waitingWindow time.Duration,
 //
 // Make sure to run this in another goroutine.
 func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan.Operation) error {
+	// ----------------------------------------
+	// Init
+	// ----------------------------------------
+
 	if opsChan == nil {
 		return fmt.Errorf("nil channel passed")
 	}
 
+	ops := []*sdwan.Operation{}
+	waitingTimer := time.NewTimer(o.waitingWindow)
+	// We stop it immediately, because we only want it to be active
+	// when we have at least one operation.
+	waitingTimer.Stop()
+
+	log := o.log.With().Str("worker", "Operations Handler").Logger()
+	log.Info().Msg("worker in free mode")
+
+	// ----------------------------------------
+	// Watch for the operations
+	// ----------------------------------------
+
+	for {
+		select {
+
+		// -- Need to quit?
+		case <-mainCtx.Done():
+			log.Err(mainCtx.Err()).Msg("cancel requested")
+			waitingTimer.Stop()
+			return nil
+
+		// -- Received an operation?
+		case op := <-opsChan:
+			log.Info().
+				Str("type", string(op.Type)).
+				Str("name", op.ApplicationName).
+				Strs("hosts", op.Servers).
+				Msg("received operation request")
+
+			if len(ops) == 0 {
+				if o.waitingWindow > 0 {
+					log.Info().Str("waiting-duration", o.waitingWindow.String()).Msg("starting waiting mode")
+				}
+
+				waitingTimer.Reset(o.waitingWindow)
+			}
+
+			ops = append(ops, op)
+			for len(opsChan) > 0 && o.waitingWindow == 0 {
+				// If the waiting window is disabled, then we will try to get
+				// all other pending operations from the channel. This way we
+				// can try to perform everything in bulk instead of one thing
+				// at time: that would be disastrous for performance!
+				ops = append(ops, <-opsChan)
+			}
+
+		// -- Need to go into busy mode (i.e. apply configuration on vManage)?
+		case <-waitingTimer.C:
+			o.busyMode(mainCtx, ops)
+
+			// Reset
+			ops = []*sdwan.Operation{}
+			log.Info().Msg("back in free mode")
+		}
+	}
+}
+
+func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Operation) {
 	// TODO
-	return nil
 }

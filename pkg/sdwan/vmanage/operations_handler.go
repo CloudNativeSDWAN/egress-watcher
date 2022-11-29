@@ -19,12 +19,20 @@ package vmanage
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	vmanagego "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go"
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/customapp"
+	verrors "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/errors"
 	"github.com/rs/zerolog"
+)
+
+const (
+	customAppListDesc string = "Managed by Egress Watcher."
 )
 
 // OperationsHandler receives operations from the controller in a general
@@ -129,5 +137,103 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 }
 
 func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Operation) {
-	// TODO
+	// First create any custom applications
+	applicationsToEnable := o.handleCreateOps(ctx, operations)
+	_ = applicationsToEnable
+}
+
+func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations []*sdwan.Operation) []string {
+	appListsToEnable := []string{}
+
+	// ----------------------------------------
+	// Create the custom applications (and lists)
+	// ----------------------------------------
+
+	for _, op := range operations {
+		// Previously, we had a "categorization" loop which would categorize
+		// operations according to the operation type to perform and later
+		// pass only the relevant data to the create, update, or delete
+		// functions. We're not going to have thousands of operations to
+		// justify an algorithm like that, so we just skip them instead.
+		if op.Type != sdwan.OperationAdd {
+			continue
+		}
+
+		for _, serverName := range op.Servers {
+			// -- First create the application
+			appID, err := func() (string, error) {
+				ctx, canc := context.WithTimeout(mainCtx, time.Minute)
+				defer canc()
+
+				return o.createCustomApplication(ctx, serverName)
+			}()
+			if err != nil {
+				// logging is done in the function
+				continue
+			}
+
+			// TODO: use the appID
+			_ = appID
+		}
+	}
+
+	return appListsToEnable
+}
+
+// replaceDots replaces all the dots in a name with underscores.
+//
+// This is just a shorthand function used to return a suitable application
+// or application list name from a server name.
+func replaceDots(hostName string) string {
+	return strings.ReplaceAll(
+		strings.ReplaceAll(hostName, ".", "_"),
+		"*", "_")
+}
+
+func (o *OperationsHandler) createCustomApplication(ctx context.Context, serverName string) (string, error) {
+	name := replaceDots(serverName)
+	l := o.log.With().Str("name", name).Str("hostname", serverName).Logger()
+
+	// -- First, check if it already exists
+	existing, err := o.client.CustomApplications().GetByName(ctx, name)
+	switch {
+	case err == nil:
+		// TODO: also check if the host is different and log if so
+		// and return error so that the list is not created
+		l.Info().Msg("a custom application with this name already exists:")
+
+		for _, servName := range existing.ServerNames {
+			if servName == serverName {
+				return "", nil
+			}
+		}
+
+		l.Warn().Msg("existing custom application does not contain server " +
+			"name included in resource")
+
+		return "", nil
+	case !errors.Is(err, verrors.ErrorNotFound):
+		l.Err(err).
+			Msg("cannot check if application already exists: skipping...")
+		return "", fmt.Errorf("cannot check if application already exists: "+
+			"%w", err)
+	default:
+		l.Debug().Msg("creating custom application...")
+	}
+
+	// -- Create the custom application
+	appID, err := o.client.CustomApplications().
+		Create(ctx, customapp.CreateUpdateOptions{
+			Name:        name,
+			ServerNames: []string{serverName},
+			// TODO: handle IPs, protocol and port
+			L3L4Attributes: customapp.L3L4Attributes{},
+		})
+	if err != nil {
+		return "", err
+	}
+
+	l.Info().Str("application-id", *appID).
+		Msg("custom application successfully created")
+	return *appID, nil
 }

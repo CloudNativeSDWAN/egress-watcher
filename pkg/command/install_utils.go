@@ -263,7 +263,7 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 
 func cleanUP(clientset *kubernetes.Clientset, objecttype int) error {
 
-	for i := 0; i <= objecttype; {
+	for i := 0; i <= objecttype; i++ {
 
 		switch i {
 
@@ -278,16 +278,15 @@ func cleanUP(clientset *kubernetes.Clientset, objecttype int) error {
 			if err != nil {
 				return err
 			}
-			break
 
 		case 2:
 			err := clientset.CoreV1().Namespaces().Delete(context.TODO(), "egress-watcher", metav1.DeleteOptions{})
 			if err != nil {
 				return err
 			}
-			break
+
 		}
-		i++
+
 	}
 
 	return nil

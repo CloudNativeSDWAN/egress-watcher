@@ -119,12 +119,12 @@ func getInstallCommand() *cobra.Command {
 
 func install(clientset *kubernetes.Clientset, docker_image string, opt Options) error {
 
-	type deletecomponent int
+	type deleteComponentStep int
 
 	const (
-		clusterrole deletecomponent = iota
-		clusterrolebinding
-		namespace
+		clusterRoleStep deleteComponentStep = iota
+		clusterRoleBindingStep
+		namespaceStep
 	)
 
 	logLevels := [3]zerolog.Level{
@@ -149,7 +149,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 
 	log.Info().Msg("Attempting clusterrolebinding creation")
 	if err := createClusterRoleBinding(clientset, usernamespace, "egress-watcher-role-binding"); err != nil {
-		outputerr := cleanUP(clientset, 0)
+		outputerr := cleanUP(clientset, int(clusterRoleStep))
 		if outputerr != nil {
 			log.Info().Msg("Could not delete a created resource")
 		}
@@ -159,7 +159,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 
 	log.Info().Msg("Attempting namespace creation")
 	if err := createNamespace(clientset, usernamespace); err != nil {
-		outputerr := cleanUP(clientset, 1)
+		outputerr := cleanUP(clientset, int(clusterRoleBindingStep))
 		if outputerr != nil {
 			log.Err(outputerr).Msg("Could not delete a created resource")
 		}
@@ -169,7 +169,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 
 	log.Info().Msg("Attempting secret creation")
 	if err := createSecret(clientset, usernamespace, "vmanage-credentials", opt); err != nil {
-		outputerr := cleanUP(clientset, 2)
+		outputerr := cleanUP(clientset, int(namespaceStep))
 		if outputerr != nil {
 			log.Info().Msg("Could not delete a created resources")
 		}
@@ -179,7 +179,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 
 	log.Info().Msg("Attempting configmap creation ")
 	if err := createConfigMap(clientset, opt, usernamespace, "egress-watcher-settings"); err != nil {
-		outputerr := cleanUP(clientset, 2)
+		outputerr := cleanUP(clientset, int(namespaceStep))
 		if outputerr != nil {
 			log.Info().Msg("Could not delete a created resource")
 		}
@@ -189,7 +189,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 
 	log.Info().Msg("Attempting serviceaccount creation")
 	if err := createServiceAccount(clientset, usernamespace, "egress-watcher-service-account"); err != nil {
-		outputerr := cleanUP(clientset, 2)
+		outputerr := cleanUP(clientset, int(namespaceStep))
 		if outputerr != nil {
 			log.Info().Msg("Could not delete a created resource")
 		}
@@ -199,7 +199,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 
 	log.Info().Msg("Attempting Deployment creation")
 	if err := createDeployment(clientset, "new-deployment", usernamespace, docker_image); err != nil {
-		outputerr := cleanUP(clientset, 2)
+		outputerr := cleanUP(clientset, int(namespaceStep))
 		if outputerr != nil {
 			log.Info().Msg("Could not delete a created resource")
 		}

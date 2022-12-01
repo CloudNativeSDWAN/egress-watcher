@@ -10,3 +10,5 @@ sdwan:
   waitingWindow: 30s
 prettyLogs: false
 verbosity: 1
+networkPolicy:
+  watchAllNetworkPolicies: false 

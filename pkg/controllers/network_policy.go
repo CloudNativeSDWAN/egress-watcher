@@ -157,8 +157,6 @@ func (n *netPolsEventHandler) Delete(de event.DeleteEvent, wq workqueue.RateLimi
 	l := n.log.With().Str("event-handler", "Delete").Logger()
 	defer wq.Done(de.Object)
 
-	l.Info().Msg("deleting...")
-
 	netpol, ok := de.Object.(*netv1.NetworkPolicy)
 	if !ok {
 		l.Error().Msg("could not unmarshal network policy!")
@@ -176,6 +174,8 @@ func (n *netPolsEventHandler) Delete(de event.DeleteEvent, wq workqueue.RateLimi
 		return
 	}
 
+	l.Info().Msg("deleting...")
+
 	n.opsChan <- &sdwan.Operation{
 		Type:            sdwan.OperationRemove,
 		ApplicationName: netpol.Name,
@@ -191,6 +191,10 @@ func (n *netPolsEventHandler) Create(ce event.CreateEvent, wq workqueue.RateLimi
 	netpol, ok := ce.Object.(*netv1.NetworkPolicy)
 	if !ok {
 		l.Error().Msg("could not unmarshal network policy!")
+		return
+	}
+
+	if !shouldWatchLabel(netpol.Labels, n.options.WatchAllNetworkPolicies) {
 		return
 	}
 

@@ -7,9 +7,11 @@
 ![GitHub release (latest SemVer including pre-releases)](https://img.shields.io/github/v/release/CloudNativeSDWAN/egress-watcher?include_prereleases)
 
 Reflect your *Egress* definitions from different object types to your
-*SD-WAN* for processing and routes optmization.
+*SD-WAN* for processing and traffic optmization.
 
 Find some context on the project in our [Talk](https://www.youtube.com/watch?v=POEedeeRs_8) @ KubeCon EU 2022 and in this *Cisco Tech Blog* [article](https://techblog.cisco.com/blog/tell-your-sd-wan).
+
+Feel free to reach out with any comment or question, you can find us at: cnwan@cisco.com
 
 ## Supported projects and providers
 

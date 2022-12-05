@@ -99,8 +99,11 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 		oldIps[oldIp] = true
 	}
 
-	if !shouldWatchLabel(curr.Labels, n.options.WatchAllNetworkPolicies) {
-		if !shouldWatchLabel(old.Labels, n.options.WatchAllNetworkPolicies) {
+	watchNow := shouldWatchLabel(curr.Labels, n.options.WatchAllNetworkPolicies)
+	watchedBefore := shouldWatchLabel(old.Labels, n.options.WatchAllNetworkPolicies)
+
+	if !watchNow {
+		if !watchedBefore {
 			return
 		}
 
@@ -111,6 +114,12 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 			Servers:         oldParsedIps,
 		}
 		return
+	} else {
+		if watchedBefore && reflect.DeepEqual(currIps, oldIps) {
+			// Something did change in the network policy, but not in things
+			// that are relevant to us.
+			return
+		}
 	}
 
 	if len(currParsedIps) == 0 {
@@ -128,21 +137,19 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 		return
 	}
 
-	if reflect.DeepEqual(currIps, oldIps) {
-		return
+	if watchedBefore {
+		// First, delete...
+		n.opsChan <- &sdwan.Operation{
+			Type:            sdwan.OperationRemove,
+			ApplicationName: curr.Name,
+			Servers:         oldParsedIps,
+		}
 	}
 
 	l.Info().Str("reason", "different IPs").
 		Strs("new-IPs", currParsedIps).
 		Strs("old-IPs", oldParsedIps).
 		Msg("sending update...")
-
-	// First, delete...
-	n.opsChan <- &sdwan.Operation{
-		Type:            sdwan.OperationRemove,
-		ApplicationName: curr.Name,
-		Servers:         oldParsedIps,
-	}
 
 	// ... then, add
 	n.opsChan <- &sdwan.Operation{

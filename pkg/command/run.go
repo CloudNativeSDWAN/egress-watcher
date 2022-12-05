@@ -290,6 +290,18 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 			return
 		}
 
+		_, err = controllers.NewNetworkPolicyController(mgr, opsChan, log)
+		if err != nil {
+			log.Err(err).Msg("could not get controller")
+			return
+		}
+
+		_, err = controllers.NewOSMcontroller(mgr, opsChan, log)
+		if err != nil {
+			log.Err(err).Msg("could not get controller")
+			return
+		}
+
 		exitWatch := make(chan struct{})
 		go func() {
 			defer close(exitWatch)

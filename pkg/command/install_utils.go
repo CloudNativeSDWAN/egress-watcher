@@ -29,6 +29,14 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const (
+	namespaceName       = "egress-watcher"
+	serviceAccountName  = "egress-watcher-service-account"
+	clusterRole         = "egress-watcher-role"
+	clusterRoleBinding  = "egress-watcher-role-binding"
+	applicationSettings = "egress-watcher-settings"
+)
+
 func createNamespace(clientset *kubernetes.Clientset, usernamespace string) error {
 	ns := &apiv1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -47,7 +55,7 @@ func createServiceAccount(clientset *kubernetes.Clientset, usernamespace, name s
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "egress-watcher-service-account",
+			Name:      serviceAccountName,
 			Namespace: usernamespace,
 		},
 	}
@@ -64,7 +72,7 @@ func createClusterRole(clientset *kubernetes.Clientset, usernamespace, name stri
 			APIVersion: "rbac.authorization.k8s.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "egress-watcher-role",
+			Name:      clusterRole,
 			Namespace: usernamespace,
 		},
 		Rules: []rbacv1.PolicyRule{
@@ -93,18 +101,18 @@ func createClusterRoleBinding(clientset *kubernetes.Clientset, usernamespace, na
 			APIVersion: "rbac.authorization.k8s.io/v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "egress-watcher-role-binding",
+			Name:      clusterRoleBinding,
 			Namespace: usernamespace,
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     "egress-watcher-role",
+			Name:     clusterRole,
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      "egress-watcher-service-account",
+				Name:      serviceAccountName,
 				Namespace: usernamespace,
 			},
 		},
@@ -124,7 +132,7 @@ func createConfigMap(clientset *kubernetes.Clientset, opt Options, usernamespace
 			APIVersion: "v1",
 		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "egress-watcher-settings",
+			Name:      applicationSettings,
 			Namespace: usernamespace,
 		},
 
@@ -165,28 +173,28 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "egress-watcher",
+			Name:      namespaceName,
 			Namespace: usernamespace,
 			Labels: map[string]string{
-				"app": "egress-watcher"},
+				"app": namespaceName},
 		},
 		Spec: appsv1.DeploymentSpec{
 			//Replicas: "2",
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app": "egress-watcher",
+					"app": namespaceName,
 				},
 			},
 			Template: apiv1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app": "egress-watcher",
+						"app": namespaceName,
 					},
 				},
 				Spec: apiv1.PodSpec{
 					Containers: []apiv1.Container{
 						{
-							Name:            "egress-watcher",
+							Name:            namespaceName,
 							Image:           image,
 							ImagePullPolicy: "Always",
 							Args: []string{
@@ -244,12 +252,12 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 							VolumeSource: apiv1.VolumeSource{
 								ConfigMap: &apiv1.ConfigMapVolumeSource{
 									LocalObjectReference: apiv1.LocalObjectReference{
-										Name: "egress-watcher-settings"},
+										Name: applicationSettings},
 								},
 							},
 						},
 					},
-					ServiceAccountName: "egress-watcher-service-account",
+					ServiceAccountName: serviceAccountName,
 				},
 			},
 		},
@@ -268,19 +276,19 @@ func cleanUP(clientset *kubernetes.Clientset, objecttype int) error {
 		switch i {
 
 		case 0:
-			err := clientset.RbacV1().ClusterRoles().Delete(context.TODO(), "egress-watcher-role", metav1.DeleteOptions{})
+			err := clientset.RbacV1().ClusterRoles().Delete(context.TODO(), clusterRole, metav1.DeleteOptions{})
 			if err != nil {
 				return err
 			}
 
 		case 1:
-			err := clientset.RbacV1().ClusterRoleBindings().Delete(context.TODO(), "egress-watcher-role-binding", metav1.DeleteOptions{})
+			err := clientset.RbacV1().ClusterRoleBindings().Delete(context.TODO(), clusterRoleBinding, metav1.DeleteOptions{})
 			if err != nil {
 				return err
 			}
 
 		case 2:
-			err := clientset.CoreV1().Namespaces().Delete(context.TODO(), "egress-watcher", metav1.DeleteOptions{})
+			err := clientset.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, metav1.DeleteOptions{})
 			if err != nil {
 				return err
 			}

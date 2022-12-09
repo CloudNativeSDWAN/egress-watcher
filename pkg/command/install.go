@@ -19,8 +19,10 @@ package command
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -39,6 +41,7 @@ const (
 	usernamespace        = "egress-watcher"
 	usersettingsfilename = "settings.yaml"
 	defaultImage         = "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
+	defaultWaitingWindow = 30 * time.Second
 )
 
 var log zerolog.Logger = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
@@ -214,50 +217,64 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	//take various inputs from user
 
 	//Username
-	fmt.Println("Hi user , please enter your sdwan username :")
 	var sdwan_username string
-	fmt.Scanln(&sdwan_username)
+	for {
+		fmt.Print("Please enter your SDWAN username: ")
+		fmt.Scanln(&sdwan_username)
+		if sdwan_username != "" {
+			break
+		}
+		fmt.Println("username provided is invalid")
+	}
 
 	//Password
-	fmt.Println("Please enter your sdwan password :")
+	fmt.Print("Please enter your sdwan password (input will be hidden): ")
 	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
 	if err != nil {
 		return err
 	}
 	sdwan_password := string(bytePassword)
+	fmt.Println()
 
 	//Baseurl
-	fmt.Println("Please enter your sdwan base_url :")
+
 	var sdwan_base_url string
-	fmt.Scanln(&sdwan_base_url)
-
-	// Waiting time
-	var waittime string
-	var sdwan_waittime time.Duration
 	for {
-		fmt.Println("Please enter the waiting time in h/m/s:")
+		fmt.Print("Please enter your SDWAN base URL, e.g. https://example.com: ")
+		fmt.Scanln(&sdwan_base_url)
 
-		fmt.Scanln(&waittime)
-		sdwan_waittime, err = time.ParseDuration(waittime)
-		if err != nil {
-			fmt.Print(err)
-		} else {
+		if _, err := url.ParseRequestURI(sdwan_base_url); err == nil {
 			break
 		}
+		fmt.Println("Provided URL is not valid")
+	}
+
+	// Waiting time
+	waittime := fmt.Sprint(defaultWaitingWindow)
+	sdwan_waittime := defaultWaitingWindow
+
+	for {
+		fmt.Printf("Please enter the waiting window time, e.g. 1m (default %s): ", defaultWaitingWindow)
+		fmt.Scanln(&waittime)
+		sdwan_waittime, err = time.ParseDuration(waittime)
+		if err == nil && sdwan_waittime >= 0 {
+			break
+		}
+		fmt.Println("Provided duration is invalid")
 	}
 
 	//self signed certificate
-	sdwan_insecure := true
+	sdwan_insecure := false
 selfSignedCertificate:
 	for {
-		fmt.Println("Do you want to accept self-signed certificates?[y/n] default[n]")
+		fmt.Print("Do you want to accept self-signed certificates? [y/n] (default: n): ")
 
 		var user_input string
 		fmt.Scanln(&user_input)
 
 		switch strings.ToLower(user_input) {
 		case "y":
-			sdwan_insecure = false
+			sdwan_insecure = true
 			break selfSignedCertificate
 		case "", "n":
 			break selfSignedCertificate
@@ -267,20 +284,29 @@ selfSignedCertificate:
 	}
 
 	// Verbosity
-	fmt.Println("Please enter the verbosity level 0,1,2 :")
-	var sdwan_verbosity int
-	fmt.Scanln(&sdwan_verbosity)
 
-	if sdwan_verbosity < 0 || sdwan_verbosity > 2 {
-		fmt.Println("invalid verbosity level provided, using default")
-		sdwan_verbosity = 0
+	sdwan_verbosity := defaultVerbosity
+	for {
+		var inputVerbosity string
+		fmt.Printf("Please enter the verbosity level 0,1,2 (default: %d): ", defaultVerbosity)
+		fmt.Scanln(&inputVerbosity)
+
+		sdwan_verbosity, err = strconv.Atoi(inputVerbosity)
+		if err == nil {
+			if sdwan_verbosity < 0 || sdwan_verbosity > 2 {
+				fmt.Println("incorrect verbosity level provided, using default")
+				sdwan_verbosity = defaultVerbosity
+			}
+			break
+		}
+		fmt.Println("Provided invalid verbosity value")
 	}
 
 	// PrettyLogs
 	sdwan_prettylogs := false
 prettyLogsInput:
 	for {
-		fmt.Println("Do you need pretty logs?[y/n] default[n]")
+		fmt.Print("Do you need pretty logs? [y/n] (default: n): ")
 
 		var user_input string
 		fmt.Scanln(&user_input)
@@ -299,7 +325,7 @@ prettyLogsInput:
 	watchall_serviceentries := false
 watchAllServicesInput:
 	for {
-		fmt.Println("Do you want to watch all the service entries ?[y/n] default[n]")
+		fmt.Print("Do you want to watch all ServiceEntry resources? [y/n] (default: n): ")
 
 		var user_input string
 		fmt.Scanln(&user_input)
@@ -317,7 +343,7 @@ watchAllServicesInput:
 	//docker image
 	docker_image := defaultImage
 
-	fmt.Println("If you want to use specific docker image , please type it else press enter default [ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0]")
+	fmt.Printf("Enter docker image (default: %s): ", defaultImage)
 	var user_input string
 	fmt.Scanln(&user_input)
 	if user_input != "" {

@@ -38,6 +38,7 @@ import (
 
 const (
 	netPolsCtrlName string = "network-policy-event-handler"
+	errTooManyIPs   string = "exceeded number of supported IPs (8)"
 )
 
 type NetworkPolicyOptions struct {
@@ -115,10 +116,33 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 		}
 		return
 	} else {
-		if watchedBefore && reflect.DeepEqual(currIps, oldIps) {
-			// Something did change in the network policy, but not in things
-			// that are relevant to us.
-			return
+		if watchedBefore {
+			if reflect.DeepEqual(currIps, oldIps) {
+				// Something did change in the network policy, but not in things
+				// that are relevant to us.
+				return
+			}
+
+			if len(currIps) > 8 {
+				if len(oldIps) > 8 {
+					return
+				}
+
+				l.Err(fmt.Errorf(errTooManyIPs)).
+					Msg("sending delete...")
+				n.opsChan <- &sdwan.Operation{
+					Type:            sdwan.OperationRemove,
+					ApplicationName: curr.Name,
+					Servers:         oldParsedIps,
+				}
+				return
+			}
+		} else {
+			if len(currIps) > 8 {
+				l.Err(fmt.Errorf(errTooManyIPs)).
+					Msg("invalid data in network policy, skipping...")
+				return
+			}
 		}
 	}
 
@@ -181,6 +205,10 @@ func (n *netPolsEventHandler) Delete(de event.DeleteEvent, wq workqueue.RateLimi
 		return
 	}
 
+	if len(parsedIps) > 8 {
+		return
+	}
+
 	l.Info().Msg("deleting...")
 
 	n.opsChan <- &sdwan.Operation{
@@ -213,8 +241,9 @@ func (n *netPolsEventHandler) Create(ce event.CreateEvent, wq workqueue.RateLimi
 	}
 
 	if len(parsedIps) > 8 {
-		l.Warn().Msg("CIDRs/IP addresses should not be more than 8. Only the first 8 would be selected")
-		parsedIps = parsedIps[0:8]
+		l.Err(fmt.Errorf(errTooManyIPs)).
+			Msg("invalid data in network policy, skipping...")
+		return
 	}
 
 	l = l.With().Strs("IPs", parsedIps).Logger()

@@ -232,7 +232,7 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	for {
 		fmt.Print("Please enter your sdwan password (input will be hidden): ")
 		bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
-		sdwan_password := string(bytePassword)
+		sdwan_password = string(bytePassword)
 		if sdwan_password != "" {
 			break
 		}

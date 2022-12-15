@@ -228,16 +228,19 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	}
 
 	//Password
-	fmt.Print("Please enter your sdwan password (input will be hidden): ")
-	bytePassword, err := term.ReadPassword(int(syscall.Stdin))
-	if err != nil {
-		return err
+	var sdwan_password string
+	for {
+		fmt.Print("Please enter your sdwan password (input will be hidden): ")
+		bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
+		sdwan_password := string(bytePassword)
+		if sdwan_password != "" {
+			break
+		}
+		fmt.Println("password provided is invalid")
 	}
-	sdwan_password := string(bytePassword)
 	fmt.Println()
 
 	//Baseurl
-
 	var sdwan_base_url string
 	for {
 		fmt.Print("Please enter your SDWAN base URL, e.g. https://example.com: ")
@@ -252,7 +255,7 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	// Waiting time
 	waittime := fmt.Sprint(defaultWaitingWindow)
 	sdwan_waittime := defaultWaitingWindow
-
+	var err error
 	for {
 		fmt.Printf("Please enter the waiting window time, e.g. 1m (default %s): ", defaultWaitingWindow)
 		fmt.Scanln(&waittime)
@@ -290,6 +293,10 @@ selfSignedCertificate:
 		var inputVerbosity string
 		fmt.Printf("Please enter the verbosity level 0,1,2 (default: %d): ", defaultVerbosity)
 		fmt.Scanln(&inputVerbosity)
+
+		if strings.Trim(inputVerbosity, " ") == "" {
+			inputVerbosity = "1"
+		}
 
 		sdwan_verbosity, err = strconv.Atoi(inputVerbosity)
 		if err == nil {

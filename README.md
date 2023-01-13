@@ -18,10 +18,11 @@ Feel free to reach out with any comment or question, you can find us at: cnwan@c
 ### Supported Egress types
 
 As of now, we support egress hosts defined as *ISTIO* `ServiceEntry` objects
+or as IPs defined in the `Egress` fields of a *Kubernetes* `NetworkPolicy`,
 and we reflect the changes we detect in them.
 
-Though only *ISTIO* is supported as of now, the project's architecture is
-designed to accomodate different types as defined by other projects.
+The project is designed to accomodate different types defined by other
+projects.
 
 ### Supported SD-WANs
 
@@ -50,7 +51,8 @@ The project is now ready to be used locally from `./bin` directory as
 
 For a quick test of the project, you can try the `scripts/quickstart.sh` script
 included in this repository that will guide you through deploying *Egress
-Watcher* iteratively with some default values.
+Watcher* iteratively with some default values and working with a `ServiceEntry`
+already prepared.
 
 Simply run the script like the following from the root folder of the
 repository:
@@ -82,10 +84,7 @@ An example of a file is provided in the root directory with `settings.yaml`.
 
 Currently it supports the following flags:
 
-* `--context`: the context of the kubeconfig to use. **This flag is not
-supported yet and will be silently ignored**.
-* `--kubeconfig`: path to the kubeconfig file to use. **This flag is not
-supported yet and will be silently ignored: the default kubeconfig is used**.
+* `--kubeconfig`: path to the kubeconfig file to use.
 * `--settings-file`: path to settings file to load. This is optional. Take a
 look at `settings.yaml` in this same directory to view an example.
 * `--sdwan.base-url`: sdwan's base url to use when forming requests.
@@ -96,6 +95,7 @@ look at `settings.yaml` in this same directory to view an example.
 the need for manual `egress-watch: enabled` label.
 To ignore a service entry you will have to label it as
 `egress-watch: disabled`.
+* `--watch-all-network-policies`: as above, but with `NetworkPolicy` objects.
 * `--sdwan.username`: the username for authentication. **Required**.
 * `--sdwan.password`: the password for authentication. **Required**.
 * `--sdwan.insecure`: whether to accept self-signed certificates.
@@ -113,14 +113,14 @@ via file.
 Please note that, as we support more egress types and SD-WANs, the above
 flags and command may change.
 
-### Watch ServiceEntry
+### Watch objects
 
-With default options the watcher will only watch `ServiceEntry` with **label**
-`egress-watch: enabled` and ignore those that don't.
+With default options the watcher will only watch supported objects that have
+**label** `egress-watch: enabled` and ignore those that don't.
 
-`--watch-all-service-entries` makes the program behave in the opposite way and
-namespaces must be explicitly disabled with a **label**
-`egress-watch: disabled`.
+`--watch-all-service-entries` and `--watch-all-network-policies` makes the
+program behave in the opposite way and in order to ignore them the **label**
+`egress-watch: disabled` must be included in the object.
 
 ## Run locally
 
@@ -137,11 +137,18 @@ Run the watcher:
 ```
 
 Try to deploy a `ServiceEntry` object you can use the provided example in
-`artifacts/yamls/istio`:
+`artifacts/yamls/examples/istio`:
 
 ```bash
 # In another shell terminal
-kubectl create -f ./artifacts/yamls/istio
+kubectl create -f ./artifacts/yamls/examples/istio
+```
+
+or a `NetworkPolicy`:
+
+```bash
+# In another shell terminal
+kubectl create -f ./artifacts/yamls/examples/network_policy
 ```
 
 Get back to the shell terminal where you were running the watcher and you
@@ -173,11 +180,16 @@ export POD_NAME=$(kubectl get pods --template '{{range .items}}{{.metadata.name}
 kubectl logs -f $POD_NAME -n egress-watcher
 ```
 
-Now, on a separate shell terminal, deploy our provided example:
+Now, on a separate shell terminal, deploy one of our provided examples:
 
 ```bash
-# In another shell terminal
-kubectl create -f ./artifacts/yamls/istio
+# In another shell terminal...
+
+# A service entry...
+kubectl create -f ./artifacts/yamls/examples/istio
+
+# Or a network policy
+kubectl create -f ./artifacts/yamls/examples/network_policy
 ```
 
 ## Contributing

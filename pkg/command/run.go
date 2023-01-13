@@ -47,17 +47,19 @@ type kubeConfigOptions struct {
 }
 
 type Options struct {
-	ServiceEntryController *controllers.ServiceEntryOptions `yaml:"serviceEntry,omitempty"`
-	Sdwan                  *sdwan.Options                   `yaml:"sdwan,omitempty"`
-	Verbosity              int                              `yaml:"verbosity"`
-	PrettyLogs             bool                             `yaml:"prettyLogs"`
+	ServiceEntryController  *controllers.ServiceEntryOptions  `yaml:"serviceEntry,omitempty"`
+	NetworkPolicyController *controllers.NetworkPolicyOptions `yaml:"networkPolicy,omitempty"`
+	Sdwan                   *sdwan.Options                    `yaml:"sdwan,omitempty"`
+	Verbosity               int                               `yaml:"verbosity"`
+	PrettyLogs              bool                              `yaml:"prettyLogs"`
 }
 
 func getRunCommand() *cobra.Command {
 	kopts := &kubeConfigOptions{}
 	waitingWindow := sdwan.DefaultWaitingWindow
 	flagOpts := &Options{
-		ServiceEntryController: &controllers.ServiceEntryOptions{},
+		ServiceEntryController:  &controllers.ServiceEntryOptions{},
+		NetworkPolicyController: &controllers.NetworkPolicyOptions{},
 		Sdwan: &sdwan.Options{
 			Authentication: &sdwan.Authentication{},
 			WaitingWindow:  &waitingWindow,
@@ -158,6 +160,9 @@ The following controllers are supported:
 				opts.ServiceEntryController.WatchAllServiceEntries = flagOpts.ServiceEntryController.WatchAllServiceEntries
 			}
 
+			if cmd.Flag("watch-all-network-policies").Changed {
+				opts.NetworkPolicyController.WatchAllNetworkPolicies = flagOpts.NetworkPolicyController.WatchAllNetworkPolicies
+			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -182,6 +187,9 @@ The following controllers are supported:
 	cmd.Flags().StringVar(&kopts.context, "context", "", "the context to use.")
 	cmd.Flags().BoolVarP(&flagOpts.ServiceEntryController.WatchAllServiceEntries,
 		"watch-all-service-entries", "w", false,
+		"whether to watch all service entries by default.")
+	cmd.Flags().BoolVarP(&flagOpts.NetworkPolicyController.WatchAllNetworkPolicies,
+		"watch-all-network-policies", "n", false,
 		"whether to watch all service entries by default.")
 	cmd.Flags().StringVarP(&flagOpts.Sdwan.BaseURL, "sdwan.base-url", "a", "",
 		"the base url where to send data.")
@@ -266,6 +274,12 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		defer close(opsChan)
 
 		_, err = controllers.NewServiceEntryController(mgr, opts.ServiceEntryController, opsChan, log)
+		if err != nil {
+			log.Err(err).Msg("could not get controller")
+			return
+		}
+
+		_, err = controllers.NewNetworkPolicyController(mgr, opts.NetworkPolicyController, opsChan, log)
 		if err != nil {
 			log.Err(err).Msg("could not get controller")
 			return

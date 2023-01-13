@@ -180,7 +180,7 @@ The following controllers are supported:
 			}
 
 			if cmd.Flag("watch-all-network-policies").Changed {
-				opts.NetworkPolicyController.WatchAllNetworkPolicies = flagOpts.NetworkPolicyController.WatchAllNetworkPolicies
+				fileOpts.NetworkPolicyController.WatchAllNetworkPolicies = flagOpts.NetworkPolicyController.WatchAllNetworkPolicies
 			}
 			return nil
 		},

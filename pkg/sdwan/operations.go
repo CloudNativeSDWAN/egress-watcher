@@ -17,6 +17,10 @@
 
 package sdwan
 
+import (
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/annotations"
+)
+
 type OperationType string
 
 const (
@@ -28,4 +32,6 @@ type Operation struct {
 	Type            OperationType
 	ApplicationName string
 	Servers         []string
+
+	OriginalObject annotations.Object
 }

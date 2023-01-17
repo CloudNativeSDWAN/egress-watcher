@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -22,10 +22,12 @@ import (
 	"fmt"
 	"reflect"
 
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/annotations"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/rs/zerolog"
 	netv1b1 "istio.io/api/networking/v1beta1"
 	vb1 "istio.io/client-go/pkg/apis/networking/v1beta1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/util/workqueue"
@@ -112,6 +114,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 			Type:            sdwan.OperationRemove,
 			ApplicationName: curr.Name,
 			Servers:         oldParsedHosts,
+			OriginalObject: annotations.Object{
+				Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+				Type: annotations.ServiceEntry,
+			},
 		}
 		return
 	}
@@ -131,6 +137,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 				Type:            sdwan.OperationRemove,
 				ApplicationName: curr.Name,
 				Servers:         oldParsedHosts,
+				OriginalObject: annotations.Object{
+					Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+					Type: annotations.ServiceEntry,
+				},
 			}
 			return
 		}
@@ -152,6 +162,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 					Type:            sdwan.OperationRemove,
 					ApplicationName: curr.Name,
 					Servers:         oldParsedHosts,
+					OriginalObject: annotations.Object{
+						Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+						Type: annotations.ServiceEntry,
+					},
 				}
 
 				// ... then, add
@@ -159,6 +173,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 					Type:            sdwan.OperationAdd,
 					ApplicationName: curr.Name,
 					Servers:         currParsedHosts,
+					OriginalObject: annotations.Object{
+						Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+						Type: annotations.ServiceEntry,
+					},
 				}
 			}
 		}
@@ -178,6 +196,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 			Type:            sdwan.OperationRemove,
 			ApplicationName: curr.Name,
 			Servers:         oldParsedHosts,
+			OriginalObject: annotations.Object{
+				Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+				Type: annotations.ServiceEntry,
+			},
 		}
 
 		return
@@ -197,6 +219,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 		Type:            sdwan.OperationRemove,
 		ApplicationName: curr.Name,
 		Servers:         oldParsedHosts,
+		OriginalObject: annotations.Object{
+			Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+			Type: annotations.ServiceEntry,
+		},
 	}
 
 	// ... then, add
@@ -204,6 +230,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 		Type:            sdwan.OperationAdd,
 		ApplicationName: curr.Name,
 		Servers:         currParsedHosts,
+		OriginalObject: annotations.Object{
+			Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+			Type: annotations.ServiceEntry,
+		},
 	}
 }
 
@@ -233,6 +263,10 @@ func (s *serviceEntryEventHandler) Delete(de event.DeleteEvent, wq workqueue.Rat
 		Type:            sdwan.OperationRemove,
 		ApplicationName: se.Name,
 		Servers:         parsedHosts,
+		OriginalObject: annotations.Object{
+			Name: types.NamespacedName{Name: se.Name, Namespace: se.Namespace},
+			Type: annotations.ServiceEntry,
+		},
 	}
 }
 
@@ -276,6 +310,10 @@ func (s *serviceEntryEventHandler) Create(ce event.CreateEvent, wq workqueue.Rat
 		Type:            sdwan.OperationAdd,
 		ApplicationName: se.Name,
 		Servers:         parsedHosts,
+		OriginalObject: annotations.Object{
+			Name: types.NamespacedName{Name: se.Name, Namespace: se.Namespace},
+			Type: annotations.ServiceEntry,
+		},
 	}
 }
 

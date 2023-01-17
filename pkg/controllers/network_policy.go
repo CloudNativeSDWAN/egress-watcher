@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,9 +23,11 @@ import (
 	"net"
 	"reflect"
 
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/annotations"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/rs/zerolog"
 	netv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/util/workqueue"
@@ -87,6 +89,11 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 		return
 	}
 
+	obj := annotations.Object{
+		Name: types.NamespacedName{Name: curr.Name, Namespace: curr.Namespace},
+		Type: annotations.NetworkPolicy,
+	}
+
 	currParsedIps := getIps(curr)
 	oldParsedIps := getIps(old)
 
@@ -113,6 +120,7 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 			Type:            sdwan.OperationRemove,
 			ApplicationName: curr.Name,
 			Servers:         oldParsedIps,
+			OriginalObject:  obj,
 		}
 		return
 	} else {
@@ -134,6 +142,7 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 					Type:            sdwan.OperationRemove,
 					ApplicationName: curr.Name,
 					Servers:         oldParsedIps,
+					OriginalObject:  obj,
 				}
 				return
 			}
@@ -156,6 +165,7 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 			Type:            sdwan.OperationRemove,
 			ApplicationName: curr.Name,
 			Servers:         oldParsedIps,
+			OriginalObject:  obj,
 		}
 
 		return
@@ -167,6 +177,7 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 			Type:            sdwan.OperationRemove,
 			ApplicationName: curr.Name,
 			Servers:         oldParsedIps,
+			OriginalObject:  obj,
 		}
 	}
 
@@ -180,6 +191,7 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 		Type:            sdwan.OperationAdd,
 		ApplicationName: curr.Name,
 		Servers:         currParsedIps,
+		OriginalObject:  obj,
 	}
 }
 
@@ -215,6 +227,10 @@ func (n *netPolsEventHandler) Delete(de event.DeleteEvent, wq workqueue.RateLimi
 		Type:            sdwan.OperationRemove,
 		ApplicationName: netpol.Name,
 		Servers:         parsedIps,
+		OriginalObject: annotations.Object{
+			Name: types.NamespacedName{Name: netpol.Name, Namespace: netpol.Namespace},
+			Type: annotations.NetworkPolicy,
+		},
 	}
 }
 
@@ -252,6 +268,10 @@ func (n *netPolsEventHandler) Create(ce event.CreateEvent, wq workqueue.RateLimi
 		Type:            sdwan.OperationAdd,
 		ApplicationName: netpol.Name,
 		Servers:         parsedIps,
+		OriginalObject: annotations.Object{
+			Name: types.NamespacedName{Name: netpol.Name, Namespace: netpol.Namespace},
+			Type: annotations.NetworkPolicy,
+		},
 	}
 }
 

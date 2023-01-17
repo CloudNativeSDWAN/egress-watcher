@@ -19,8 +19,12 @@ package annotations
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/rs/zerolog"
+	"istio.io/client-go/pkg/apis/networking/v1beta1"
+	v1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -79,14 +83,46 @@ type Object struct {
 	Type ObjectType
 }
 
-func WatchForUpdates(ctx context.Context, client client.Client, opsChan chan *Operation, log zerolog.Logger) error {
+func WatchForUpdates(ctx context.Context, k8sclient client.Client, opsChan chan *Operation, log zerolog.Logger) error {
+	h := &handler{k8sclient, log.With().Str("worker", "Annotations Handler").Logger()}
+
 	for {
 		select {
 		case <-ctx.Done():
 			return context.Canceled
 		case op := <-opsChan:
-			// TODO
-			_ = op
+			obj, err := h.getObject(ctx, op.Object.Name, op.Object.Type)
+			if client.IgnoreNotFound(err) != nil {
+				h.log.Err(err).Str("name", op.Object.Name.String()).Msg("cannot get object to annotate: skipping...")
+				continue
+			}
+
+			// TODO: use the object to annotate it
+			_ = obj
 		}
+	}
+}
+
+func (a *handler) getObject(mainCtx context.Context, name types.NamespacedName, objType ObjectType) (client.Object, error) {
+	ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
+	defer canc()
+
+	switch objType {
+	case ServiceEntry:
+		var svcEntry v1beta1.ServiceEntry
+		if err := a.Get(ctx, name, &svcEntry); err != nil {
+			return nil, fmt.Errorf("cannot get object '%s': %w", name, err)
+		}
+
+		return &svcEntry, nil
+	case NetworkPolicy:
+		var netpol v1.NetworkPolicy
+		if err := a.Get(ctx, name, &netpol); err != nil {
+			return nil, fmt.Errorf("cannot get object '%s': %w", name, err)
+		}
+
+		return &netpol, nil
+	default:
+		return nil, fmt.Errorf("'%s' is not a valid object type", objType)
 	}
 }

@@ -97,8 +97,9 @@ func WatchForUpdates(ctx context.Context, k8sclient client.Client, opsChan chan 
 				continue
 			}
 
-			// TODO: use the object to annotate it
-			_ = obj
+			if err := h.handleAnnotations(ctx, obj, op.Type); err != nil {
+				h.log.Err(err).Msg("could not set annotation")
+			}
 		}
 	}
 }
@@ -125,4 +126,28 @@ func (a *handler) getObject(mainCtx context.Context, name types.NamespacedName, 
 	default:
 		return nil, fmt.Errorf("'%s' is not a valid object type", objType)
 	}
+}
+
+func (a *handler) handleAnnotations(mainCtx context.Context, obj client.Object, opType OperationType) error {
+	ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
+	defer canc()
+
+	now := time.Now().UTC().Format(time.RFC3339)
+	annotations := obj.GetAnnotations()
+	switch opType {
+	case OperationInserted:
+		if _, exists := annotations[enabledAnnotation]; !exists {
+			annotations[insertedAnnotation] = now
+		}
+	case OperationEnabled:
+		annotations[enabledAnnotation] = now
+		delete(annotations, insertedAnnotation)
+	case OperationDisabled:
+		delete(annotations, enabledAnnotation)
+	case OperationRemoved:
+		delete(annotations, insertedAnnotation)
+	}
+
+	obj.SetAnnotations(annotations)
+	return a.Update(ctx, obj, &client.UpdateOptions{})
 }

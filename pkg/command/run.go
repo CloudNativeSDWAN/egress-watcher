@@ -177,6 +177,10 @@ The following controllers are supported:
 				fileOpts.Verbosity = flagOpts.Verbosity
 			}
 
+			if cmd.Flag("sdwan.enable").Changed {
+				fileOpts.Sdwan.Enable = flagOpts.Sdwan.Enable
+			}
+
 			if cmd.Flag("watch-all-network-policies").Changed {
 				fileOpts.NetworkPolicyController.WatchAllNetworkPolicies = flagOpts.NetworkPolicyController.WatchAllNetworkPolicies
 			}
@@ -228,6 +232,9 @@ The following controllers are supported:
 	cmd.Flags().DurationVar(flagOpts.Sdwan.WaitingWindow,
 		"waiting-window", sdwan.DefaultWaitingWindow,
 		"the duration of the waiting mode. Set this to 0 to disable it entirely.")
+	cmd.Flags().BoolVarP(&flagOpts.Sdwan.Enable,
+		"sdwan.enable", "e", false,
+		"whether to also apply configuration/policies.")
 
 	return cmd
 }

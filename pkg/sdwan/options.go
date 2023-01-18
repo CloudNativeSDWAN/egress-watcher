@@ -34,5 +34,6 @@ type Options struct {
 	BaseURL        string         `yaml:"baseUrl"`
 	Insecure       bool           `yaml:"insecure"`
 	WaitingWindow  *time.Duration `yaml:"waitingWindow"`
+	Enable         bool           `yaml:"enable"`
 	Authentication *Authentication
 }

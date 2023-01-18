@@ -3,12 +3,13 @@
 serviceEntry:
   watchAllServiceEntries: false
 networkPolicy:
-  watchAllNetworkPolicies: false 
+  watchAllNetworkPolicies: false
 sdwan:
   # Base URL where to reach sdwan's API,
   # e.g: https://example.com:9876/api
   baseUrl: <base_url>
   insecure: false
   waitingWindow: 30s
+  enable: false
 prettyLogs: false
 verbosity: 1

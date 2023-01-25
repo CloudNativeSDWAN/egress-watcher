@@ -26,6 +26,7 @@ import (
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	vmanagego "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go"
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/applist"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/customapp"
 	verrors "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/errors"
 	"github.com/rs/zerolog"
@@ -162,7 +163,7 @@ func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations 
 		for _, serverName := range op.Servers {
 			// -- First create the application
 			appID, err := func() (string, error) {
-				ctx, canc := context.WithTimeout(mainCtx, time.Minute)
+				ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
 				defer canc()
 
 				return o.createCustomApplication(ctx, serverName)
@@ -172,8 +173,20 @@ func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations 
 				continue
 			}
 
-			// TODO: use the appID
-			_ = appID
+			// -- Then create the custom application list
+			appListID, err := func() (string, error) {
+				ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
+				defer canc()
+
+				return o.createCustomApplicationList(ctx, serverName, appID)
+			}()
+			if err != nil {
+				// logging is done in the function
+				// TODO: delete the custom application if this didn't go right.
+				continue
+			}
+
+			_ = appListID
 		}
 	}
 
@@ -236,4 +249,62 @@ func (o *OperationsHandler) createCustomApplication(ctx context.Context, serverN
 	l.Info().Str("application-id", *appID).
 		Msg("custom application successfully created")
 	return *appID, nil
+}
+
+func (o *OperationsHandler) createCustomApplicationList(ctx context.Context, serverName, appID string) (string, error) {
+	name := replaceDots(serverName)
+	l := o.log.With().Str("name", name).Logger()
+
+	// -- First, check if it already exists
+	existing, err := o.client.ApplicationLists().GetByName(ctx, name)
+	switch {
+	case err == nil:
+		l.Info().Msg("a custom application list with this name already exists")
+
+		for _, apps := range existing.Applications {
+			if apps.ID == appID {
+				return "", nil
+			}
+		}
+
+		l.Warn().Str("application-id", appID).
+			Msg("existing custom application list does not include " +
+				"requested application ID: no further action will be taken")
+		return "", fmt.Errorf("custom application list does not include " +
+			"app ID")
+
+	case !errors.Is(err, verrors.ErrorNotFound):
+		l.Err(err).
+			Msg("cannot check if custom application list already exists: " +
+				"skipping...")
+
+		return "", fmt.Errorf("cannot check if application already exists: "+
+			"%w", err)
+	default:
+		l.Debug().Msg("creating custom application list...")
+	}
+
+	applistID, err := o.client.ApplicationLists().
+		Create(ctx, applist.CreateUpdateOptions{
+			Name:        name,
+			Description: customAppListDesc,
+			Applications: []applist.Application{
+				{
+					Name: name,
+					ID:   appID,
+				},
+			},
+			// TODO: provide a way to define custom probes.
+			Probe: applist.Probe{
+				Type:  applist.FQDNProbe,
+				Value: serverName,
+			},
+		})
+
+	if err != nil {
+		l.Err(err).Msg("cannot create custom application list")
+		return "", fmt.Errorf("cannot create custom application list: %w", err)
+	}
+
+	return *applistID, nil
 }

@@ -27,8 +27,10 @@ import (
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	vmanagego "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/applist"
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/cloudx"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/customapp"
 	verrors "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/errors"
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/status"
 	"github.com/rs/zerolog"
 )
 
@@ -140,7 +142,43 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Operation) {
 	// First create any custom applications
 	applicationsToEnable := o.handleCreateOps(ctx, operations)
-	_ = applicationsToEnable
+
+	// Apply
+	pushRequired, err := o.client.CloudExpress().Applications().
+		Toggle(ctx, cloudx.ToggleOptions{
+			Enable: applicationsToEnable,
+			// TODO: add stuff to disable
+			Disable: []string{},
+		})
+	if err != nil {
+		o.log.Err(err).Msg("cannot enable/disable custom application")
+		return
+	}
+
+	if pushRequired {
+		o.log.Info().Msg("applying configuration to all devices...")
+		operationID, err := o.client.CloudExpress().Devices().
+			ApplyConfigurationToAllDevices(ctx)
+		if err != nil {
+			o.log.Err(err).Msg("could not apply configuration to all devices")
+			return
+		}
+
+		o.log.Info().Str("operation ID", *operationID).
+			Msg("waiting for operation to complete...")
+		summary, err := o.client.Status().
+			WaitForOperationToFinish(ctx, status.WaitOptions{
+				OperationID: *operationID,
+			})
+		if err != nil {
+			o.log.Err(err).Msg("error while waiting for opeartion to complete")
+			return
+		}
+
+		o.log.Info().Str("status", summary.Status).
+			Str("operation ID", *operationID).
+			Msg("applied configuration to all devices")
+	}
 }
 
 func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations []*sdwan.Operation) []string {
@@ -174,7 +212,7 @@ func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations 
 			}
 
 			// -- Then create the custom application list
-			appListID, err := func() (string, error) {
+			_, err = func() (string, error) {
 				ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
 				defer canc()
 
@@ -186,7 +224,7 @@ func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations 
 				continue
 			}
 
-			_ = appListID
+			appListsToEnable = append(appListsToEnable, replaceDots(serverName))
 		}
 	}
 
@@ -211,20 +249,18 @@ func (o *OperationsHandler) createCustomApplication(ctx context.Context, serverN
 	existing, err := o.client.CustomApplications().GetByName(ctx, name)
 	switch {
 	case err == nil:
-		// TODO: also check if the host is different and log if so
-		// and return error so that the list is not created
-		l.Info().Msg("a custom application with this name already exists:")
+		l.Info().Msg("a custom application with this name already exists")
 
 		for _, servName := range existing.ServerNames {
 			if servName == serverName {
-				return "", nil
+				return existing.ID, nil
 			}
 		}
 
 		l.Warn().Msg("existing custom application does not contain server " +
 			"name included in resource")
 
-		return "", nil
+		return existing.ID, nil
 	case !errors.Is(err, verrors.ErrorNotFound):
 		l.Err(err).
 			Msg("cannot check if application already exists: skipping...")

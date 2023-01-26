@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/annotations"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan/vmanage/types/approute"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan/vmanage/types/policy"
@@ -36,7 +37,7 @@ const (
 	defaultReauthTimeout time.Duration = 30 * time.Second
 )
 
-func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan.Operation, waitingWindow time.Duration, log zerolog.Logger) error {
+func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan.Operation, annsChan chan *annotations.Operation, waitingWindow time.Duration, log zerolog.Logger) error {
 	toRemove, toAdd := []*sdwan.Operation{}, []*sdwan.Operation{}
 
 	// We stop it immediately, because we only want it to be active
@@ -126,9 +127,9 @@ func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan
 
 				var err error
 				if ops[0].Type == sdwan.OperationRemove {
-					err = v.removeApplications(ctx, toRemove, log)
+					err = v.removeApplications(ctx, toRemove, annsChan, log)
 				} else {
-					err = v.addApplications(ctx, toAdd, log)
+					err = v.addApplications(ctx, toAdd, annsChan, log)
 				}
 
 				return err
@@ -160,10 +161,12 @@ func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan
 	}
 }
 
-func (v *Client) removeApplications(ctx context.Context, ops []*sdwan.Operation, log zerolog.Logger) error {
+func (v *Client) removeApplications(ctx context.Context, ops []*sdwan.Operation, annsOps chan *annotations.Operation, log zerolog.Logger) error {
 	names := make([]string, len(ops))
+	originalObjects := map[string]annotations.Object{}
 	for i, op := range ops {
 		names[i] = op.ApplicationName
+		originalObjects[op.ApplicationName] = op.OriginalObject
 	}
 	log = log.With().Str("worker", "remover").Logger()
 
@@ -324,6 +327,13 @@ func (v *Client) removeApplications(ctx context.Context, ops []*sdwan.Operation,
 		l.Debug().Str("operation-id", opID).Msg("finished")
 	}
 
+	for _, name := range names {
+		annsOps <- &annotations.Operation{
+			Object: originalObjects[name],
+			Type:   annotations.OperationDisabled,
+		}
+	}
+
 	// -- Delete the policy application list.
 	for _, polAppList := range polAppLists {
 		if err := v.
@@ -354,6 +364,11 @@ func (v *Client) removeApplications(ctx context.Context, ops []*sdwan.Operation,
 					Msg("deleted custom application")
 			}
 		}
+
+		annsOps <- &annotations.Operation{
+			Object: originalObjects[polAppList.Name],
+			Type:   annotations.OperationRemoved,
+		}
 	}
 
 	log.Info().Msg("all done")
@@ -361,15 +376,17 @@ func (v *Client) removeApplications(ctx context.Context, ops []*sdwan.Operation,
 	return nil
 }
 
-func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, log zerolog.Logger) error {
+func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, annsOps chan *annotations.Operation, log zerolog.Logger) error {
 	names := make([]string, len(ops))
 	customApplications := make([]*policy.CustomApplication, len(ops))
+	originalObjects := map[string]annotations.Object{}
 	for i, op := range ops {
 		customApplications[i] = &policy.CustomApplication{
 			Name:        op.ApplicationName,
 			ServerNames: op.Servers,
 		}
 		names[i] = op.ApplicationName
+		originalObjects[op.ApplicationName] = op.OriginalObject
 	}
 	log = log.With().Str("worker", "adder").Logger()
 
@@ -389,6 +406,10 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 						Str("app-id", customApplications[i].ID).
 						Str("current-app", customApplications[i].Name).
 						Msg("custom application already exists, skipping creation...")
+					annsOps <- &annotations.Operation{
+						Object: originalObjects[exCustApp.Name],
+						Type:   annotations.OperationInserted,
+					}
 				}
 			}
 		}
@@ -454,6 +475,11 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 			Str("current-app", customApp.Name).
 			Msg("created policy application list and received list ID")
 
+		annsOps <- &annotations.Operation{
+			Object: originalObjects[customApp.Name],
+			Type:   annotations.OperationInserted,
+		}
+
 		listIDs[customApp.Name] = listID
 	}
 
@@ -479,6 +505,13 @@ func (v *Client) addApplications(ctx context.Context, ops []*sdwan.Operation, lo
 			return fmt.Errorf("could not get status of operation %s: %w", opID, err)
 		}
 		opl.Debug().Msg("finished")
+	}
+
+	for _, name := range names {
+		annsOps <- &annotations.Operation{
+			Object: originalObjects[name],
+			Type:   annotations.OperationEnabled,
+		}
 	}
 
 	// -- Get all vSmart policies.

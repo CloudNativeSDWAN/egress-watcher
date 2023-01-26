@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,6 +28,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/annotations"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan/vmanage"
@@ -290,7 +291,9 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		}
 
 		opsChan := make(chan *sdwan.Operation, 100)
+		annsChan := make(chan *annotations.Operation, 100)
 		defer close(opsChan)
+		defer close(annsChan)
 
 		_, err = controllers.NewServiceEntryController(mgr, opts.ServiceEntryController, opsChan, log)
 		if err != nil {
@@ -305,11 +308,25 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		}
 
 		exitWatch := make(chan struct{})
-		go func() {
-			defer close(exitWatch)
 
-			if err = vclient.WatchForOperations(ctx, opsChan, *opts.Sdwan.WaitingWindow, log); err != nil {
-				log.Err(err).Msg("error while watch for operations")
+		go func() {
+			defer func() {
+				exitWatch <- struct{}{}
+			}()
+
+			if err = annotations.WatchForUpdates(ctx, mgr.GetClient(), annsChan, log); err != nil {
+				log.Err(err).Msg("error while watching for annotation operations")
+				return
+			}
+		}()
+
+		go func() {
+			defer func() {
+				exitWatch <- struct{}{}
+			}()
+
+			if err = vclient.WatchForOperations(ctx, opsChan, annsChan, *opts.Sdwan.WaitingWindow, log); err != nil {
+				log.Err(err).Msg("error while watching for sdwan operations")
 				return
 			}
 		}()
@@ -329,6 +346,7 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 	log.Info().Msg("exit requested")
 
 	canc()
+	<-exitChan
 	<-exitChan
 	log.Info().Msg("good bye!")
 

@@ -3,7 +3,7 @@ module github.com/CloudNativeSDWAN/egress-watcher
 go 1.18
 
 require (
-	github.com/rs/zerolog v1.28.0
+	github.com/rs/zerolog v1.29.0
 	github.com/spf13/cobra v1.6.1
 	gopkg.in/yaml.v3 v3.0.1
 	istio.io/api v0.0.0-20221208070204-0528cb6ce63b

@@ -27,6 +27,7 @@ import (
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	vmanagego "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/applist"
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/approute"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/cloudx"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/customapp"
 	verrors "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/errors"
@@ -143,6 +144,9 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 	// First create any custom applications
 	applicationsToEnable := o.handleCreateOps(ctx, operations)
 
+	// TODO: check if len applicationsToEnable > 0 && appsToDisable > 0
+	// if they are == 0 then return
+
 	// Apply
 	pushRequired, err := o.client.CloudExpress().Applications().
 		Toggle(ctx, cloudx.ToggleOptions{
@@ -179,6 +183,9 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 			Str("operation ID", *operationID).
 			Msg("applied configuration to all devices")
 	}
+
+	// And finally, (re)activate the approute policies
+	o.activatePolicies(ctx, applicationsToEnable, []string{})
 }
 
 func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations []*sdwan.Operation) []string {
@@ -343,4 +350,72 @@ func (o *OperationsHandler) createCustomApplicationList(ctx context.Context, ser
 	}
 
 	return *applistID, nil
+}
+
+func (o *OperationsHandler) activatePolicies(ctx context.Context, appsToAdd, appsToRemove []string) {
+	o.log.Info().Msg("starting to activate policies")
+
+	appRoutePols, err := o.client.AppRoute().List(context.Background())
+	if err != nil {
+		o.log.Err(err).Msg("cannot get approute policies to update")
+		return
+	}
+	o.log.Debug().Int("#", len(appRoutePols)).Msg("pulled approute policies")
+
+	for _, arPol := range appRoutePols {
+		processID, err := o.client.AppRoute().
+			UpdateApplicationListsOnPolicy(ctx, arPol.ID,
+				approute.AddRemoveAppListOptions{
+					Add:    appsToAdd,
+					Remove: appsToRemove,
+				})
+		if err != nil {
+			o.log.Err(err).Str("id", arPol.ID).
+				Msg("cannot update application list on policy")
+			return
+		}
+
+		o.log.Info().Str("id", arPol.ID).
+			Msg("updated application list on approute")
+		o.log.Debug().Str("process-id", *processID).Msg("received process ID")
+
+		for _, activatedID := range arPol.ActivatedByVSmartPolicies {
+			vpol, err := o.client.VSmartPolicies().Get(ctx, activatedID)
+			if err != nil {
+				o.log.Err(err).Str("id", activatedID).
+					Msg("cannot retrieve vSmart policy by ID")
+				return
+			}
+
+			if err := o.client.VSmartPolicies().
+				UpdateCentralPolicy(context.Background(), *vpol); err != nil {
+				o.log.Err(err).Str("id", vpol.ID).
+					Msg("could not update central policy")
+				return
+			}
+			o.log.Info().Str("id", vpol.ID).Str("name", vpol.Name).
+				Msg("updated vsmart policy")
+
+			operationID, err := o.client.VSmartPolicies().
+				ActivatePolicy(context.Background(), vpol.ID, *processID)
+			if err != nil {
+				o.log.Err(err).Str("id", vpol.ID).Str("name", vpol.Name).
+					Msg("err smart activate")
+				return
+			}
+			o.log.Info().Str("id", vpol.ID).Str("name", vpol.Name).
+				Msg("activated vSmart policy")
+			o.log.Debug().Str("id", *operationID).Msg("received operation ID")
+			o.log.Info().Msg("waiting for operation to finish...")
+
+			_, err = o.client.Status().WaitForOperationToFinish(ctx, status.WaitOptions{
+				OperationID: *operationID,
+			})
+			if err != nil {
+				o.log.Err(err).Msg("error while waiting for operation to finish")
+				return
+			}
+		}
+	}
+	o.log.Info().Msg("all done")
 }

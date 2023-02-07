@@ -144,15 +144,31 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 	// First create any custom applications
 	applicationsToEnable := o.handleCreateOps(ctx, operations)
 
-	// TODO: check if len applicationsToEnable > 0 && appsToDisable > 0
-	// if they are == 0 then return
+	// Get the *names* of the applications to disable
+	applicationsToDisable := func() (disable []string) {
+		for _, op := range operations {
+			if op.Type != sdwan.OperationRemove {
+				continue
+			}
+
+			for _, host := range op.Servers {
+				disable = append(disable, replaceDots(host))
+			}
+		}
+
+		return
+	}()
+
+	if len(applicationsToEnable) == 0 && len(applicationsToDisable) == 0 {
+		o.log.Debug().Msg("no changes to apply, stopping here")
+		return
+	}
 
 	// Apply
 	pushRequired, err := o.client.CloudExpress().Applications().
 		Toggle(ctx, cloudx.ToggleOptions{
-			Enable: applicationsToEnable,
-			// TODO: add stuff to disable
-			Disable: []string{},
+			Enable:  applicationsToEnable,
+			Disable: applicationsToDisable,
 		})
 	if err != nil {
 		o.log.Err(err).Msg("cannot enable/disable custom application")

@@ -202,6 +202,13 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 
 	// And finally, (re)activate the approute policies
 	o.activatePolicies(ctx, applicationsToEnable, []string{})
+
+	// Now delete the custom applications, if any
+	if len(applicationsToDisable) > 0 {
+		o.handleRemoveOps(ctx, operations)
+	}
+
+	o.log.Info().Msg("all done")
 }
 
 func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations []*sdwan.Operation) []string {
@@ -252,6 +259,84 @@ func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations 
 	}
 
 	return appListsToEnable
+}
+
+func (o *OperationsHandler) handleRemoveOps(mainCtx context.Context, operations []*sdwan.Operation) {
+	toRemove := func() map[string]bool {
+		toRemoveMap := map[string]bool{}
+		for _, op := range operations {
+			if op.Type != sdwan.OperationRemove {
+				continue
+			}
+
+			for _, serverName := range op.Servers {
+				toRemoveMap[replaceDots(serverName)] = true
+			}
+		}
+
+		return toRemoveMap
+	}()
+
+	// First, get the list of applications. We need this because we need
+	// to check if the lists are referenced somewhere else.
+	listIds := map[string]*applist.ApplicationList{}
+	lists, _ := o.client.ApplicationLists().List(mainCtx)
+	for _, list := range lists {
+		if _, exists := toRemove[list.Name]; exists {
+			// TODO: also check if application is managed by someone other
+			// than us, if that is not the case, then log that it won't be
+			// touched.
+			listIds[list.Name] = list
+		}
+	}
+
+	// ----------------------------------------
+	// Remove the custom applications lists
+	// and associated custom applications
+	// ----------------------------------------
+
+	o.log.Info().Msg("deleting custom application lists...")
+	for _, list := range listIds {
+		if list.ReferenceCount > 0 {
+			o.log.Warn().
+				Str("name", list.Name).
+				Str("reason", "referenced somewhere else").
+				Int("reference-count", list.ReferenceCount).
+				Msg("cannot delete this custom application list, skipping...")
+			continue
+		}
+
+		if err := o.client.ApplicationLists().Delete(mainCtx, list.ID); err != nil {
+			o.log.Err(err).Str("name", list.Name).
+				Msg("cannot delete custom application list, skipping...")
+			continue
+		}
+
+		o.log.Info().Str("name", list.Name).
+			Msg("custom application list deleted successfully")
+
+		// Get ID of apps to delete
+		appIDs := []string{}
+		for _, apps := range list.Applications {
+			//
+			appIDs = append(appIDs, apps.ID)
+		}
+
+		o.log.Info().Str("name", list.Name).
+			Msg("deleting associated custom applications...")
+
+		for _, appID := range appIDs {
+			err := o.client.CustomApplications().Delete(mainCtx, appID)
+			if err != nil {
+				o.log.Err(err).Str("id", appID).
+					Msg("cannot delete associated custom application with provided " +
+						"id, skipping...")
+			} else {
+				o.log.Info().Str("id", appID).
+					Msg("associated custom application deleted successfully")
+			}
+		}
+	}
 }
 
 // replaceDots replaces all the dots in a name with underscores.
@@ -433,5 +518,4 @@ func (o *OperationsHandler) activatePolicies(ctx context.Context, appsToAdd, app
 			}
 		}
 	}
-	o.log.Info().Msg("all done")
 }

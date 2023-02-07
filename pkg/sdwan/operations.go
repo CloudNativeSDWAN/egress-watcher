@@ -22,10 +22,15 @@ type OperationType string
 const (
 	OperationRemove OperationType = "remove"
 	OperationAdd    OperationType = "add"
+	OperationUpdate OperationType = "update"
 )
 
 type Operation struct {
 	Type            OperationType
 	ApplicationName string
-	Servers         []string
+	// DEPRECATED: only one server is allowed per custom application.
+	// Send one Operation per server and use Server instead.
+	Servers []string
+
+	Server string
 }

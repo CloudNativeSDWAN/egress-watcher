@@ -144,7 +144,7 @@ Try to deploy a `ServiceEntry` object. You can use the provided example in
 kubectl create -f ./artifacts/yamls/examples/istio
 ```
 
-or a `NetworkPolicy`:
+For a `NetworkPolicy` you can do instead:
 
 ```bash
 # In another shell terminal

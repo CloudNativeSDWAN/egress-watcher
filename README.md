@@ -51,7 +51,7 @@ The project is now ready to be used locally from `./bin` directory as
 
 For a quick test of the project, you can try the `scripts/quickstart.sh` script
 included in this repository that will guide you through deploying *Egress
-Watcher* iteratively with some default values and working with a `ServiceEntry`
+Watcher* iteratively with some default values and working with an Istio's `ServiceEntry`
 already prepared.
 
 Simply run the script like the following from the root folder of the

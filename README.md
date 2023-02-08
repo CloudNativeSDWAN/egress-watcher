@@ -21,7 +21,7 @@ As of now, we support egress hosts defined as *ISTIO* `ServiceEntry` objects
 or as IPs defined in the `Egress` fields of a *Kubernetes* `NetworkPolicy`,
 and we reflect the changes we detect in them.
 
-The project is designed to accomodate different types defined by other
+The project is designed to accomodate different types of egress policies or external services defined by other
 projects.
 
 ### Supported SD-WANs

@@ -136,7 +136,7 @@ Run the watcher:
 --sdwan.insecure
 ```
 
-Try to deploy a `ServiceEntry` object you can use the provided example in
+Try to deploy a `ServiceEntry` object. You can use the provided example in
 `artifacts/yamls/examples/istio`:
 
 ```bash

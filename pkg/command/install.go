@@ -214,9 +214,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 }
 
 func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
-	//take various inputs from user
-
-	//Username
+	// Username
 	var sdwan_username string
 	for {
 		fmt.Print("Please enter your SDWAN username: ")
@@ -227,7 +225,7 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 		fmt.Println("username provided is invalid")
 	}
 
-	//Password
+	// Password
 	var sdwan_password string
 	for {
 		fmt.Print("Please enter your sdwan password (input will be hidden): ")
@@ -240,7 +238,7 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	}
 	fmt.Println()
 
-	//Baseurl
+	// Base URL
 	var sdwan_base_url string
 	for {
 		fmt.Print("Please enter your SDWAN base URL, e.g. https://example.com: ")
@@ -266,7 +264,7 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 		fmt.Println("Provided duration is invalid")
 	}
 
-	//self signed certificate
+	// Self-signed certificates
 	sdwan_insecure := false
 selfSignedCertificate:
 	for {
@@ -287,7 +285,6 @@ selfSignedCertificate:
 	}
 
 	// Verbosity
-
 	sdwan_verbosity := defaultVerbosity
 	for {
 		var inputVerbosity string
@@ -309,7 +306,7 @@ selfSignedCertificate:
 		fmt.Println("Provided invalid verbosity value")
 	}
 
-	// PrettyLogs
+	// Pretty logs
 	sdwan_prettylogs := false
 prettyLogsInput:
 	for {
@@ -328,8 +325,8 @@ prettyLogsInput:
 		}
 	}
 
-	// Watch all services
-	watchall_serviceentries := false
+	// Watch all service entries
+	watchAllServiceEntries := false
 watchAllServicesInput:
 	for {
 		fmt.Print("Do you want to watch all ServiceEntry resources? [y/n] (default: n): ")
@@ -339,11 +336,28 @@ watchAllServicesInput:
 
 		switch strings.ToLower(user_input) {
 		case "y":
-			watchall_serviceentries = true
+			watchAllServiceEntries = true
 			break watchAllServicesInput
 		case "", "n":
 			break watchAllServicesInput
+		}
+	}
 
+	// Watch all network policies
+	watchAllNetPols := false
+whatchAllNetPolsInput:
+	for {
+		fmt.Print("Do you want to watch all NetworkPolicy resources? [y/n] (default: n): ")
+
+		var user_input string
+		fmt.Scanln(&user_input)
+
+		switch strings.ToLower(user_input) {
+		case "y":
+			watchAllNetPols = true
+			break whatchAllNetPolsInput
+		case "", "n":
+			break whatchAllNetPolsInput
 		}
 	}
 
@@ -359,7 +373,10 @@ watchAllServicesInput:
 
 	opt := Options{
 		ServiceEntryController: &controllers.ServiceEntryOptions{
-			WatchAllServiceEntries: watchall_serviceentries,
+			WatchAllServiceEntries: watchAllServiceEntries,
+		},
+		NetworkPolicyController: &controllers.NetworkPolicyOptions{
+			WatchAllNetworkPolicies: watchAllNetPols,
 		},
 
 		Sdwan: &sdwan.Options{

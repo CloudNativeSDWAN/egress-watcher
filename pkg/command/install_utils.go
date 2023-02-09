@@ -77,9 +77,17 @@ func createClusterRole(clientset *kubernetes.Clientset, usernamespace, name stri
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups: []string{
-					"networking.istio.io"},
+				APIGroups: []string{"networking.istio.io"},
 				Resources: []string{"serviceentries"},
+				Verbs: []string{
+					"watch",
+					"get",
+					"list",
+				},
+			},
+			{
+				APIGroups: []string{"networking.k8s.io"},
+				Resources: []string{"networkpolicies"},
 				Verbs: []string{
 					"watch",
 					"get",

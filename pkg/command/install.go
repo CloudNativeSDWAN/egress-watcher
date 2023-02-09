@@ -218,6 +218,23 @@ func install(clientset *kubernetes.Clientset, dockerImage string, opt Options) e
 }
 
 func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
+	askYesNo := func() bool {
+		// Utility function to ask for yes or no with no as default.
+		for {
+			var user_input string
+			fmt.Scanln(&user_input)
+
+			switch strings.ToLower(user_input) {
+			case "y":
+				return true
+			case "", "n":
+				return false
+			}
+
+			fmt.Printf("invalid input, please try again: [y/n] (default: n): ")
+		}
+	}
+
 	// Username
 	var sdwan_username string
 	for {
@@ -269,24 +286,8 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	}
 
 	// Self-signed certificates
-	sdwan_insecure := false
-selfSignedCertificate:
-	for {
-		fmt.Print("Do you want to accept self-signed certificates? [y/n] (default: n): ")
-
-		var user_input string
-		fmt.Scanln(&user_input)
-
-		switch strings.ToLower(user_input) {
-		case "y":
-			sdwan_insecure = true
-			break selfSignedCertificate
-		case "", "n":
-			break selfSignedCertificate
-
-		}
-
-	}
+	fmt.Print("Do you want to accept self-signed certificates? [y/n] (default: n): ")
+	sdwan_insecure := askYesNo()
 
 	// Verbosity
 	sdwan_verbosity := defaultVerbosity
@@ -311,63 +312,20 @@ selfSignedCertificate:
 	}
 
 	// Pretty logs
-	sdwan_prettylogs := false
-prettyLogsInput:
-	for {
-		fmt.Print("Do you need pretty logs? [y/n] (default: n): ")
-
-		var user_input string
-		fmt.Scanln(&user_input)
-
-		switch strings.ToLower(user_input) {
-		case "y":
-			sdwan_prettylogs = true
-			break prettyLogsInput
-		case "", "n":
-			break prettyLogsInput
-
-		}
-	}
+	fmt.Print("Do you need human-readable logs? [y/n] (default: n): ")
+	sdwan_prettylogs := askYesNo()
 
 	// Watch all service entries
-	watchAllServiceEntries := false
-watchAllServicesInput:
-	for {
-		fmt.Print("Do you want to watch all ServiceEntry resources? [y/n] (default: n): ")
-
-		var user_input string
-		fmt.Scanln(&user_input)
-
-		switch strings.ToLower(user_input) {
-		case "y":
-			watchAllServiceEntries = true
-			break watchAllServicesInput
-		case "", "n":
-			break watchAllServicesInput
-		}
-	}
+	fmt.Print("Do you want to watch all ServiceEntry resources? [y/n] (default: n): ")
+	watchAllServiceEntries := askYesNo()
 
 	// Watch all network policies
-	watchAllNetPols := false
-whatchAllNetPolsInput:
-	for {
-		fmt.Print("Do you want to watch all NetworkPolicy resources? [y/n] (default: n): ")
-
-		var user_input string
-		fmt.Scanln(&user_input)
-
-		switch strings.ToLower(user_input) {
-		case "y":
-			watchAllNetPols = true
-			break whatchAllNetPolsInput
-		case "", "n":
-			break whatchAllNetPolsInput
-		}
-	}
+	fmt.Print("Do you want to watch all NetworkPolicy resources? [y/n] (default: n): ")
+	watchAllNetPols := askYesNo()
 
 	// Docker Image
 	dockerImage := ""
-	fmt.Printf("Enter docker image (default: latest official release): ")
+	fmt.Printf("Enter docker image (press enter for latest official release): ")
 	var user_input string
 	fmt.Scanln(&user_input)
 

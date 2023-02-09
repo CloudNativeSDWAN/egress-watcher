@@ -2,6 +2,8 @@
 # Feel free to modify this to fit your use case.
 serviceEntry:
   watchAllServiceEntries: false
+networkPolicy:
+  watchAllNetworkPolicies: false 
 sdwan:
   # Base URL where to reach sdwan's API,
   # e.g: https://example.com:9876/api

@@ -141,12 +141,18 @@ func (v *Client) WatchForOperations(mainCtx context.Context, opsChan chan *sdwan
 				}
 			}
 
-			if mainCtx.Err() != nil {
+			log.Debug().Dur("duration", 5*time.Second).
+				Msg("cooling down...")
+			coolDown := time.NewTimer(5 * time.Second)
+			select {
+			case <-mainCtx.Done():
 				// Avoid adding custom applications, then.
 				return nil
+			case <-coolDown.C:
+				log.Debug().Msg("finished cool down")
 			}
 
-			// -- The, add the new applications
+			// -- Then, add the new applications
 			if len(toAdd) > 0 {
 				if err := doAction(toAdd); err != nil {
 					log.Err(err).Msg("error while adding custom applications")

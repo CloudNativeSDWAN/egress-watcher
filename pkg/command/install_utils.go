@@ -19,11 +19,13 @@ package command
 
 import (
 	"context"
+	"fmt"
 
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	apiv1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -145,7 +147,7 @@ func createConfigMap(clientset *kubernetes.Clientset, opt Options, usernamespace
 		},
 
 		Data: map[string]string{
-			usersettingsfilename: string(yaml_opt),
+			"settings.yaml": string(yaml_opt),
 		},
 	}
 
@@ -224,7 +226,6 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 									"cpu":    resource.MustParse("200m"),
 									"memory": resource.MustParse("100Mi"),
 								},
-
 								Requests: apiv1.ResourceList{
 									"cpu":    resource.MustParse("100m"),
 									"memory": resource.MustParse("50Mi"),
@@ -277,32 +278,26 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 
 }
 
-func cleanUP(clientset *kubernetes.Clientset, objecttype int) error {
+func cleanUP(clientset *kubernetes.Clientset) error {
+	// Remove the cluster role
+	err := clientset.RbacV1().ClusterRoles().
+		Delete(context.TODO(), clusterRole, metav1.DeleteOptions{})
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("could not delete cluster role: %w", err)
+	}
 
-	for i := 0; i <= objecttype; i++ {
+	// Remove the cluster role binding
+	err = clientset.RbacV1().ClusterRoleBindings().
+		Delete(context.TODO(), clusterRoleBinding, metav1.DeleteOptions{})
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("could not delete cluster role binding: %w", err)
+	}
 
-		switch i {
-
-		case 0:
-			err := clientset.RbacV1().ClusterRoles().Delete(context.TODO(), clusterRole, metav1.DeleteOptions{})
-			if err != nil {
-				return err
-			}
-
-		case 1:
-			err := clientset.RbacV1().ClusterRoleBindings().Delete(context.TODO(), clusterRoleBinding, metav1.DeleteOptions{})
-			if err != nil {
-				return err
-			}
-
-		case 2:
-			err := clientset.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, metav1.DeleteOptions{})
-			if err != nil {
-				return err
-			}
-
-		}
-
+	// Remove the namespace
+	err = clientset.CoreV1().Namespaces().
+		Delete(context.TODO(), namespaceName, metav1.DeleteOptions{})
+	if err != nil && !k8serrors.IsNotFound(err) {
+		return fmt.Errorf("could not delete namespace: %w", err)
 	}
 
 	return nil

@@ -18,6 +18,7 @@
 package command
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"os"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
+	"github.com/google/go-github/github"
 	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -38,10 +40,12 @@ import (
 )
 
 const (
-	defaultNamespace     = "egress-watcher"
-	usersettingsfilename = "settings.yaml"
-	defaultImage         = "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
-	defaultWaitingWindow = 30 * time.Second
+	defaultNamespace             = "egress-watcher"
+	usersettingsfilename         = "settings.yaml"
+	defaultContainerRegistryRepo = "ghcr.io/cloudnativesdwan/egress-watcher"
+	githubOrgName                = "CloudNativeSDWAN"
+	githubRepoName               = "egress-watcher"
+	defaultWaitingWindow         = 30 * time.Second
 )
 
 var log zerolog.Logger = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
@@ -96,7 +100,7 @@ func getInstallCommand() *cobra.Command {
 				return installInteractivelyToK8s(clientset)
 			} else {
 
-				return install(clientset, defaultImage, opt)
+				return install(clientset, "", opt)
 			}
 
 		},
@@ -120,8 +124,7 @@ func getInstallCommand() *cobra.Command {
 	return cmd
 }
 
-func install(clientset *kubernetes.Clientset, docker_image string, opt Options) error {
-
+func install(clientset *kubernetes.Clientset, dockerImage string, opt Options) error {
 	type deleteComponentStep int
 
 	const (
@@ -134,6 +137,29 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 		zerolog.DebugLevel,
 		zerolog.InfoLevel,
 		zerolog.ErrorLevel,
+	}
+
+	if dockerImage == "" {
+		// Get the latest tag image. We could just use "latest", but we don't
+		// like doing that as we prefer to have a clear idea of which version
+		// is installed.
+		latestOfficialTag, err := func() (string, error) {
+			ctx, canc := context.WithTimeout(context.Background(), 30*time.Second)
+			defer canc()
+
+			client := github.NewClient(nil)
+			rel, _, err := client.Repositories.GetLatestRelease(ctx, githubOrgName, githubRepoName)
+			if err != nil {
+				return "", err
+			}
+
+			return *rel.TagName, nil
+		}()
+		if err != nil {
+			return fmt.Errorf("cannot get latest release: %w", err)
+		}
+
+		dockerImage = fmt.Sprintf("%s:%s", defaultContainerRegistryRepo, latestOfficialTag)
 	}
 
 	if opt.PrettyLogs {
@@ -201,7 +227,7 @@ func install(clientset *kubernetes.Clientset, docker_image string, opt Options) 
 	log.Info().Msg("ServiceAccount created successfully")
 
 	log.Info().Msg("Attempting Deployment creation")
-	if err := createDeployment(clientset, "new-deployment", defaultNamespace, docker_image); err != nil {
+	if err := createDeployment(clientset, "new-deployment", defaultNamespace, dockerImage); err != nil {
 		outputerr := cleanUP(clientset, int(namespaceStep))
 		if outputerr != nil {
 			log.Info().Msg("Could not delete a created resource")
@@ -361,15 +387,11 @@ whatchAllNetPolsInput:
 		}
 	}
 
-	//docker image
-	docker_image := defaultImage
-
-	fmt.Printf("Enter docker image (default: %s): ", defaultImage)
+	// Docker Image
+	dockerImage := ""
+	fmt.Printf("Enter docker image (default: latest official release): ")
 	var user_input string
 	fmt.Scanln(&user_input)
-	if user_input != "" {
-		docker_image = user_input
-	}
 
 	opt := Options{
 		ServiceEntryController: &controllers.ServiceEntryOptions{
@@ -392,6 +414,6 @@ whatchAllNetPolsInput:
 		Verbosity:  sdwan_verbosity,
 	}
 
-	return install(clientset, docker_image, opt)
+	return install(clientset, dockerImage, opt)
 
 }

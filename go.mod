@@ -3,6 +3,7 @@ module github.com/CloudNativeSDWAN/egress-watcher
 go 1.18
 
 require (
+	github.com/google/go-github v17.0.0+incompatible
 	github.com/rs/zerolog v1.29.0
 	github.com/spf13/cobra v1.6.1
 	golang.org/x/term v0.5.0
@@ -31,6 +32,7 @@ require (
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/google/gnostic v0.5.7-v3refs // indirect
 	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/gofuzz v1.1.0 // indirect
 	github.com/google/uuid v1.1.2 // indirect
 	github.com/imdario/mergo v0.3.12 // indirect

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -31,7 +30,6 @@ import (
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/google/go-github/github"
-	"github.com/rs/zerolog"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
@@ -47,8 +45,6 @@ const (
 	defaultName                  = "egress-watcher"
 	defaultWaitingWindow         = 30 * time.Second
 )
-
-var log zerolog.Logger = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
 
 func getInstallCommand() *cobra.Command {
 	var (
@@ -81,15 +77,17 @@ func getInstallCommand() *cobra.Command {
 				return fmt.Errorf("cannot get clientset: %w", err)
 			}
 
-			a := 30 * time.Second
 			opt := Options{
 				ServiceEntryController: &controllers.ServiceEntryOptions{
 					WatchAllServiceEntries: false,
 				},
 
 				Sdwan: &sdwan.Options{
-					WaitingWindow: &a,
-					BaseURL:       baseurl,
+					WaitingWindow: func() *time.Duration {
+						waiting := defaultWaitingWindow
+						return &waiting
+					}(),
+					BaseURL: baseurl,
 					Authentication: &sdwan.Authentication{
 						Username: user,
 						Password: pass,
@@ -124,14 +122,13 @@ func getInstallCommand() *cobra.Command {
 	return cmd
 }
 
-func install(clientset *kubernetes.Clientset, dockerImage string, opt Options) error {
-	logLevels := [3]zerolog.Level{
-		zerolog.DebugLevel,
-		zerolog.InfoLevel,
-		zerolog.ErrorLevel,
+func install(clientset *kubernetes.Clientset, containerImage string, opts Options) error {
+	inst, err := newInstaller(clientset, defaultNamespace, defaultName)
+	if err != nil {
+		return err
 	}
 
-	if dockerImage == "" {
+	if containerImage == "" {
 		// Get the latest tag image. We could just use "latest", but we don't
 		// like doing that as we prefer to have a clear idea of which version
 		// is installed.
@@ -151,70 +148,12 @@ func install(clientset *kubernetes.Clientset, dockerImage string, opt Options) e
 			return fmt.Errorf("cannot get latest release: %w", err)
 		}
 
-		dockerImage = fmt.Sprintf("%s:%s", defaultContainerRegistryRepo, latestOfficialTag)
+		containerImage = fmt.Sprintf("%s:%s", defaultContainerRegistryRepo, latestOfficialTag)
 	}
 
-	if opt.PrettyLogs {
-		log = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
-	} else {
-		log = zerolog.New(os.Stderr).With().Timestamp().Logger()
-	}
-	log = log.Level(logLevels[opt.Verbosity])
-	log.Info().Msg("Starting...")
+	fmt.Println("using", containerImage)
 
-	var createErr error
-	defer func() {
-		if createErr != nil {
-			fmt.Println("cleaning up...")
-			if err := cleanUP(clientset); err != nil {
-				fmt.Println(err)
-			}
-		}
-	}()
-
-	log.Info().Msg("Attempting clusterrole creation")
-	if createErr = createClusterRole(clientset, defaultNamespace, "egress-watcher-role"); createErr != nil {
-		return createErr
-	}
-	log.Info().Msg("ClusterRole created successfully")
-
-	log.Info().Msg("Attempting clusterrolebinding creation")
-	if createErr = createClusterRoleBinding(clientset, defaultNamespace, "egress-watcher-role-binding"); createErr != nil {
-		return createErr
-	}
-	log.Info().Msg("ClusterRoleBinding created successfully")
-
-	log.Info().Msg("Attempting namespace creation")
-	if createErr = createNamespace(clientset, defaultNamespace); createErr != nil {
-		return createErr
-	}
-	log.Info().Msg("Namespace created successfully")
-
-	log.Info().Msg("Attempting secret creation")
-	if createErr = createSecret(clientset, defaultNamespace, "vmanage-credentials", opt); createErr != nil {
-		return createErr
-	}
-	log.Info().Msg("Secret created successfully")
-
-	log.Info().Msg("Attempting configmap creation ")
-	if createErr = createConfigMap(clientset, opt, defaultNamespace, "egress-watcher-settings"); createErr != nil {
-		return createErr
-	}
-	log.Info().Msg("ConfigMap created successfully")
-
-	log.Info().Msg("Attempting serviceaccount creation")
-	if createErr = createServiceAccount(clientset, defaultNamespace, "egress-watcher-service-account"); createErr != nil {
-		return createErr
-	}
-	log.Info().Msg("ServiceAccount created successfully")
-
-	log.Info().Msg("Attempting Deployment creation")
-	if createErr = createDeployment(clientset, "new-deployment", defaultNamespace, dockerImage); createErr != nil {
-		return createErr
-	}
-	log.Info().Msg("Deployment created successfully")
-
-	return nil
+	return inst.install(context.Background(), containerImage, opts)
 }
 
 func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {

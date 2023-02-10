@@ -20,6 +20,7 @@ package command
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
@@ -38,6 +39,81 @@ const (
 	clusterRoleBinding  = "egress-watcher-role-binding"
 	applicationSettings = "egress-watcher-settings"
 )
+
+type installer struct {
+	namespace string
+	name      string
+	clientset *kubernetes.Clientset
+
+	namespaceExisted bool
+	saExisted        bool
+}
+
+func newInstaller(clientset *kubernetes.Clientset, namespace, name string) (*installer, error) {
+	if clientset == nil {
+		return nil, fmt.Errorf("no clientset provided")
+	}
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
+	if name == "" {
+		name = defaultName
+	}
+
+	inst := &installer{
+		clientset: clientset,
+		namespace: namespace,
+		name:      name,
+	}
+
+	// Check if namespace already exists
+	nsExisted, err := func() (bool, error) {
+		ctx, canc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer canc()
+
+		_, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return false, nil
+			}
+
+			return false, err
+		}
+
+		return true, nil
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("cannot check if namespace %s already exists: %w", namespace, err)
+	}
+	if !nsExisted {
+		inst.namespaceExisted = nsExisted
+		return inst, nil
+	}
+
+	// Check if service account already exists
+	saName := name + "-service-account"
+	saExisted, err := func() (bool, error) {
+		ctx, canc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer canc()
+
+		_, err := clientset.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return false, nil
+			}
+
+			return false, err
+		}
+
+		return true, nil
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("cannot check if service account %s already exists: %w", saName, err)
+	}
+
+	inst.saExisted = saExisted
+	return inst, nil
+}
 
 func createNamespace(clientset *kubernetes.Clientset, usernamespace string) error {
 	ns := &apiv1.Namespace{

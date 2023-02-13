@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -158,7 +158,7 @@ func (i *installer) install(ctx context.Context, containerImage string, opts Opt
 
 		if err := inst(ctx); err != nil {
 			fmt.Println(" ", emoji.CrossMark, err)
-			i.cleanUp()
+			i.cleanUp(ctx)
 			return err
 		}
 
@@ -383,65 +383,63 @@ func (i *installer) createDeployment(ctx context.Context, containerImage string)
 	return
 }
 
-func (i *installer) cleanUp() error {
-	secretName := i.name + "-vmanage-credentials"
-	serviceAccountName := i.name + "-service-account"
-	settingsName := i.name + "-settings"
-	clusterRoleBindingName := i.name + "-cluster-role-binding"
-	clusterRoleName := i.name + "-cluster-role"
+func (i *installer) cleanUp(ctx context.Context) error {
+	// Array of functions that remove a resource.
+	removers := []func(context.Context) error{
+		func(ctx context.Context) error {
+			return i.clientset.RbacV1().ClusterRoles().
+				Delete(context.TODO(), i.clusterRoleName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.RbacV1().ClusterRoleBindings().
+				Delete(context.TODO(), i.clusterRoleBindingName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.AppsV1().Deployments(i.namespace).
+				Delete(context.TODO(), i.name, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			if i.saExisted {
+				return nil
+			}
+			return i.clientset.CoreV1().ServiceAccounts(i.namespace).
+				Delete(context.TODO(), i.serviceAccountName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.CoreV1().ConfigMaps(i.namespace).
+				Delete(context.TODO(), i.settingsName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.CoreV1().Secrets(i.namespace).
+				Delete(context.TODO(), i.secretName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			if i.namespaceExisted {
+				return nil
+			}
+			return i.clientset.CoreV1().Namespaces().
+				Delete(context.TODO(), i.namespace, metav1.DeleteOptions{})
+		},
+	}
+
+	// Array of resources type names, each of these maps to the same item
+	// on the previous one.
+	resources := []string{
+		"cluster role",
+		"cluster role binding",
+		"deployment",
+		"service account",
+		"config map",
+		"secret",
+		"namespace",
+	}
 
 	fmt.Println("undoing changes ", emoji.BackArrow)
 
-	// Remove the cluster role
-	err := i.clientset.RbacV1().ClusterRoles().
-		Delete(context.TODO(), clusterRoleName, metav1.DeleteOptions{})
-	if err != nil && !k8serrors.IsNotFound(err) {
-		fmt.Println("could not delete cluster role: %w", err)
-	}
-
-	// Remove the cluster role binding
-	err = i.clientset.RbacV1().ClusterRoleBindings().
-		Delete(context.TODO(), clusterRoleBindingName, metav1.DeleteOptions{})
-	if err != nil && !k8serrors.IsNotFound(err) {
-		fmt.Println("could not delete cluster role binding: %w", err)
-	}
-
-	// Remove the deployment
-	err = i.clientset.AppsV1().Deployments(i.namespace).
-		Delete(context.TODO(), i.name, metav1.DeleteOptions{})
-	if err != nil && !k8serrors.IsNotFound(err) {
-		fmt.Println("could not delete deployment: %w", err)
-	}
-
-	// Remove the service account
-	if !i.saExisted {
-		err = i.clientset.CoreV1().ServiceAccounts(i.namespace).
-			Delete(context.TODO(), serviceAccountName, metav1.DeleteOptions{})
-		if err != nil && !k8serrors.IsNotFound(err) {
-			fmt.Println("could not delete service account: %w", err)
-		}
-	}
-
-	// Remove the configmap
-	err = i.clientset.CoreV1().ConfigMaps(i.namespace).
-		Delete(context.TODO(), settingsName, metav1.DeleteOptions{})
-	if err != nil && !k8serrors.IsNotFound(err) {
-		fmt.Println("could not delete configmap: %w", err)
-	}
-
-	// Remove the secret
-	err = i.clientset.CoreV1().Secrets(i.namespace).
-		Delete(context.TODO(), secretName, metav1.DeleteOptions{})
-	if err != nil && !k8serrors.IsNotFound(err) {
-		fmt.Println("could not delete secret: %w", err)
-	}
-
-	// Remove the namespace
-	if !i.namespaceExisted {
-		err = i.clientset.CoreV1().Namespaces().
-			Delete(context.TODO(), i.namespace, metav1.DeleteOptions{})
-		if err != nil && !k8serrors.IsNotFound(err) {
-			fmt.Println("could not delete namespace: %w", err)
+	// Remove each resource
+	for j, remover := range removers {
+		if err := remover(ctx); err != nil && !k8serrors.IsNotFound(err) {
+			fmt.Printf("could not delete %s: %s\n", resources[j], err)
 		}
 	}
 

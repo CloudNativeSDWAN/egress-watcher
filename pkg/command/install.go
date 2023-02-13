@@ -289,6 +289,6 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 		Verbosity:  sdwan_verbosity,
 	}
 
+	fmt.Println()
 	return install(clientset, dockerImage, opt)
-
 }

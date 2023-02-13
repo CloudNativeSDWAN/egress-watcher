@@ -14,6 +14,8 @@
 // limitations under the License.
 //
 // SPDX-License-Identifier: Apache-2.0
+//
+// Credit to @chowndarya for the original work and functions created here.
 
 package command
 
@@ -40,6 +42,12 @@ type installer struct {
 
 	namespaceExisted bool
 	saExisted        bool
+
+	clusterRoleName        string
+	clusterRoleBindingName string
+	serviceAccountName     string
+	secretName             string
+	settingsName           string
 }
 
 func newInstaller(clientset *kubernetes.Clientset, namespace, name string) (*installer, error) {
@@ -53,11 +61,9 @@ func newInstaller(clientset *kubernetes.Clientset, namespace, name string) (*ins
 		name = defaultName
 	}
 
-	inst := &installer{
-		clientset: clientset,
-		namespace: namespace,
-		name:      name,
-	}
+	inst := newInstallerWithNames(name)
+	inst.namespace = namespace
+	inst.clientset = clientset
 
 	// Check if namespace already exists
 	nsExisted, err := func() (bool, error) {
@@ -84,7 +90,6 @@ func newInstaller(clientset *kubernetes.Clientset, namespace, name string) (*ins
 	}
 
 	// Check if service account already exists
-	saName := name + "-service-account"
 	saExisted, err := func() (bool, error) {
 		ctx, canc := context.WithTimeout(context.Background(), 10*time.Second)
 		defer canc()
@@ -101,11 +106,22 @@ func newInstaller(clientset *kubernetes.Clientset, namespace, name string) (*ins
 		return true, nil
 	}()
 	if err != nil {
-		return nil, fmt.Errorf("cannot check if service account %s already exists: %w", saName, err)
+		return nil, fmt.Errorf("cannot check if service account %s already exists: %w", inst.serviceAccountName, err)
 	}
 
 	inst.saExisted = saExisted
 	return inst, nil
+}
+
+func newInstallerWithNames(name string) *installer {
+	return &installer{
+		name:                   name,
+		clusterRoleName:        name + "-cluster-role",
+		clusterRoleBindingName: name + "-cluster-role-binding",
+		serviceAccountName:     name + "-service-account",
+		secretName:             name + "-credentials",
+		settingsName:           name + "-settings",
+	}
 }
 
 func (i *installer) install(ctx context.Context, containerImage string, opts Options) error {
@@ -153,11 +169,9 @@ func (i *installer) install(ctx context.Context, containerImage string, opts Opt
 }
 
 func (i *installer) createClusterRole(ctx context.Context) (err error) {
-	name := i.name + "-cluster-role"
-
 	cr := &rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      i.clusterRoleName,
 			Namespace: i.namespace,
 		},
 		Rules: []rbacv1.PolicyRule{
@@ -180,24 +194,20 @@ func (i *installer) createClusterRole(ctx context.Context) (err error) {
 }
 
 func (i *installer) createClusterRoleBinding(ctx context.Context) (err error) {
-	name := i.name + "-cluster-role-binding"
-	serviceAccountName := i.name + "-service-account"
-	clusterRoleName := i.name + "-cluster-role"
-
 	crb := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      i.clusterRoleBindingName,
 			Namespace: i.namespace,
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     clusterRoleName,
+			Name:     i.clusterRoleName,
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      serviceAccountName,
+				Name:      i.serviceAccountName,
 				Namespace: i.namespace,
 			},
 		},
@@ -220,11 +230,9 @@ func (i *installer) createNamespace(ctx context.Context) (err error) {
 }
 
 func (i *installer) createServiceAccount(ctx context.Context) (err error) {
-	name := i.name + "-service-account"
-
 	_, err = i.clientset.CoreV1().ServiceAccounts(i.namespace).Create(context.TODO(), &v1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      i.serviceAccountName,
 			Namespace: i.namespace,
 		},
 	}, metav1.CreateOptions{})
@@ -233,11 +241,9 @@ func (i *installer) createServiceAccount(ctx context.Context) (err error) {
 }
 
 func (i *installer) createSecret(ctx context.Context, opts Options) (err error) {
-	name := i.name + "-vmanage-credentials"
-
 	secret := &v1.Secret{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      i.secretName,
 			Namespace: i.namespace,
 		},
 		Data: map[string][]byte{
@@ -253,7 +259,6 @@ func (i *installer) createSecret(ctx context.Context, opts Options) (err error) 
 }
 
 func (i *installer) createConfigMap(ctx context.Context, opts Options) (err error) {
-	name := i.name + "-settings"
 	yamlOpts, err := yaml.Marshal(opts)
 	if err != nil {
 		return fmt.Errorf("cannot marshal options to yaml: %w", err)
@@ -262,7 +267,7 @@ func (i *installer) createConfigMap(ctx context.Context, opts Options) (err erro
 	_, err = i.clientset.CoreV1().
 		ConfigMaps(i.namespace).Create(ctx, &v1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
+			Name:      i.settingsName,
 			Namespace: i.namespace,
 		},
 
@@ -275,10 +280,7 @@ func (i *installer) createConfigMap(ctx context.Context, opts Options) (err erro
 
 func (i *installer) createDeployment(ctx context.Context, containerImage string) (err error) {
 	deploymentsClient := i.clientset.AppsV1().Deployments(i.namespace)
-	secretName := i.name + "-vmanage-credentials"
 	configVolumeName := "config-volume"
-	serviceAccountName := i.name + "-service-account"
-	settingsName := i.name + "-settings"
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -337,7 +339,7 @@ func (i *installer) createDeployment(ctx context.Context, containerImage string)
 									ValueFrom: &v1.EnvVarSource{
 										SecretKeyRef: &v1.SecretKeySelector{
 											LocalObjectReference: v1.LocalObjectReference{
-												Name: secretName,
+												Name: i.secretName,
 											},
 											Key: "username",
 										},
@@ -349,7 +351,7 @@ func (i *installer) createDeployment(ctx context.Context, containerImage string)
 									ValueFrom: &v1.EnvVarSource{
 										SecretKeyRef: &v1.SecretKeySelector{
 											LocalObjectReference: v1.LocalObjectReference{
-												Name: secretName,
+												Name: i.secretName,
 											},
 											Key: "password",
 										},
@@ -365,13 +367,13 @@ func (i *installer) createDeployment(ctx context.Context, containerImage string)
 							VolumeSource: v1.VolumeSource{
 								ConfigMap: &v1.ConfigMapVolumeSource{
 									LocalObjectReference: v1.LocalObjectReference{
-										Name: settingsName,
+										Name: i.settingsName,
 									},
 								},
 							},
 						},
 					},
-					ServiceAccountName: serviceAccountName,
+					ServiceAccountName: i.serviceAccountName,
 				},
 			},
 		},

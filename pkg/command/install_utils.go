@@ -22,9 +22,11 @@ package command
 import (
 	"context"
 	"fmt"
+	"syscall"
 	"time"
 
 	"github.com/enescakir/emoji"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
@@ -444,4 +446,17 @@ func (i *installer) cleanUp(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func askForPassword() (pass string) {
+	for {
+		fmt.Print("Please enter your SDWAN password (input will be hidden): ")
+		bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
+		pass = string(bytePassword)
+		if pass != "" {
+			return
+		}
+
+		fmt.Println("password provided is invalid")
+	}
 }

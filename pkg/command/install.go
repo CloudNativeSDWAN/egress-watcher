@@ -24,14 +24,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/google/go-github/github"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
@@ -93,10 +91,10 @@ func getInstallCommand() *cobra.Command {
 
 			if interactive {
 				return installInteractivelyToK8s(clientset)
-			} else {
-
-				return install(clientset, "", opts)
 			}
+
+			opts.Sdwan.Authentication.Password = askForPassword()
+			return install(clientset, "", opts)
 
 		},
 		Example: "install --username myself --password password " +
@@ -118,8 +116,6 @@ func getInstallCommand() *cobra.Command {
 		"the base url where to send data.")
 	cmd.Flags().StringVar(&opts.Sdwan.Authentication.Username,
 		"sdwan.username", "", "username to authenticate as.")
-	cmd.Flags().StringVar(&opts.Sdwan.Authentication.Password,
-		"sdwan.password", "", "password for authenticating.")
 	cmd.Flags().BoolVar(&opts.Sdwan.Insecure,
 		"sdwan.insecure", false,
 		"whether to connect to the SD-WAN ignoring self signed certificates.")
@@ -200,16 +196,7 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 	}
 
 	// Password
-	var sdwan_password string
-	for {
-		fmt.Print("Please enter your sdwan password (input will be hidden): ")
-		bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
-		sdwan_password = string(bytePassword)
-		if sdwan_password != "" {
-			break
-		}
-		fmt.Println("password provided is invalid")
-	}
+	sdwan_password := askForPassword()
 	fmt.Println()
 
 	// Base URL

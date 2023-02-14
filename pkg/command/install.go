@@ -47,6 +47,8 @@ const (
 func getInstallCommand() *cobra.Command {
 	interactive := false
 	waitingWindow := defaultWaitingWindow
+	containerImage := ""
+
 	opts := Options{
 		ServiceEntryController: &controllers.ServiceEntryOptions{
 			WatchAllServiceEntries: false,
@@ -94,7 +96,7 @@ func getInstallCommand() *cobra.Command {
 			}
 
 			opts.Sdwan.Authentication.Password = askForPassword()
-			return install(clientset, "", opts)
+			return install(clientset, containerImage, opts)
 
 		},
 		Example: "install --username myself --password password " +
@@ -128,6 +130,9 @@ func getInstallCommand() *cobra.Command {
 	cmd.Flags().DurationVar(opts.Sdwan.WaitingWindow,
 		"waiting-window", sdwan.DefaultWaitingWindow,
 		"the duration of the waiting mode. Set this to 0 to disable it entirely.")
+	cmd.Flags().StringVar(&containerImage,
+		"image", "",
+		"the container's image. If blank, the latest official one will be used.")
 
 	return cmd
 }

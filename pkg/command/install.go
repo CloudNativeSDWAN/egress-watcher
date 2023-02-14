@@ -47,12 +47,26 @@ const (
 )
 
 func getInstallCommand() *cobra.Command {
-	var (
-		interactive bool
-		user        string
-		pass        string
-		baseurl     string
-	)
+	interactive := false
+	waitingWindow := defaultWaitingWindow
+	opts := Options{
+		ServiceEntryController: &controllers.ServiceEntryOptions{
+			WatchAllServiceEntries: false,
+		},
+		NetworkPolicyController: &controllers.NetworkPolicyOptions{
+			WatchAllNetworkPolicies: false,
+		},
+
+		Sdwan: &sdwan.Options{
+			WaitingWindow: &waitingWindow,
+			BaseURL:       "",
+			Authentication: &sdwan.Authentication{
+				Username: "",
+				Password: "",
+			},
+			Insecure: false,
+		},
+	}
 
 	cmd := &cobra.Command{
 		Use:   "install [OPTIONS]",
@@ -77,47 +91,47 @@ func getInstallCommand() *cobra.Command {
 				return fmt.Errorf("cannot get clientset: %w", err)
 			}
 
-			opt := Options{
-				ServiceEntryController: &controllers.ServiceEntryOptions{
-					WatchAllServiceEntries: false,
-				},
-
-				Sdwan: &sdwan.Options{
-					WaitingWindow: func() *time.Duration {
-						waiting := defaultWaitingWindow
-						return &waiting
-					}(),
-					BaseURL: baseurl,
-					Authentication: &sdwan.Authentication{
-						Username: user,
-						Password: pass,
-					},
-				},
-			}
 			if interactive {
 				return installInteractivelyToK8s(clientset)
 			} else {
 
-				return install(clientset, "", opt)
+				return install(clientset, "", opts)
 			}
 
 		},
-		Example: "install -i",
+		Example: "install --username myself --password password " +
+			"--base-url https://my-vmanage.com",
 	}
 
 	// Flags
+	// We use the same flag names as the run command to be consistent.
 	cmd.Flags().BoolVarP(&interactive,
 		"interactive", "i", false,
 		"whether to install interactively.")
-	cmd.Flags().StringVar(&user,
-		"username", "",
-		"the username for sdwan.")
-	cmd.Flags().StringVar(&pass,
-		"password", "",
-		"the password for sdwan.")
-	cmd.Flags().StringVar(&baseurl,
-		"base-url", "",
-		"the base url for sdwan.")
+	cmd.Flags().BoolVarP(&opts.ServiceEntryController.WatchAllServiceEntries,
+		"watch-all-service-entries", "w", false,
+		"whether to watch all service entries by default.")
+	cmd.Flags().BoolVarP(&opts.NetworkPolicyController.WatchAllNetworkPolicies,
+		"watch-all-network-policies", "n", false,
+		"whether to watch all service entries by default.")
+	cmd.Flags().StringVarP(&opts.Sdwan.BaseURL, "sdwan.base-url", "a", "",
+		"the base url where to send data.")
+	cmd.Flags().StringVar(&opts.Sdwan.Authentication.Username,
+		"sdwan.username", "", "username to authenticate as.")
+	cmd.Flags().StringVar(&opts.Sdwan.Authentication.Password,
+		"sdwan.password", "", "password for authenticating.")
+	cmd.Flags().BoolVar(&opts.Sdwan.Insecure,
+		"sdwan.insecure", false,
+		"whether to connect to the SD-WAN ignoring self signed certificates.")
+	cmd.Flags().IntVar(&opts.Verbosity,
+		"verbosity", 1,
+		"verbosity level, from 0 to 2.")
+	cmd.Flags().BoolVar(&opts.PrettyLogs,
+		"pretty-logs", false,
+		"whether to log data in a slower but human readable format.")
+	cmd.Flags().DurationVar(opts.Sdwan.WaitingWindow,
+		"waiting-window", sdwan.DefaultWaitingWindow,
+		"the duration of the waiting mode. Set this to 0 to disable it entirely.")
 
 	return cmd
 }

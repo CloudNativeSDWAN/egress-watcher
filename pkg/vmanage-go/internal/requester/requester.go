@@ -27,6 +27,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strings"
 
 	verrors "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/errors"
 )
@@ -181,6 +182,14 @@ func (r *Requester) Do(ctx context.Context, opts ...WithRequestOption) (*http.Re
 		}
 
 		if errBody, exists := rawMessage["error"]; exists {
+
+			// This is by no means a good way to do this, but unfortunately
+			// there is no documentation about error codes. So this is all we
+			// have.
+			if strings.Contains(strings.ToLower(string(errBody)), "failed to find") {
+				return resp, verrors.ErrorNotFound
+			}
+
 			var verr verrors.VmanageError
 			if parseErr := json.Unmarshal(errBody, &verr); parseErr == nil {
 				err = &verr

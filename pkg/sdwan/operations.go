@@ -20,9 +20,12 @@ package sdwan
 type OperationType string
 
 const (
-	OperationRemove OperationType = "remove"
-	OperationAdd    OperationType = "add"
-	OperationUpdate OperationType = "update"
+	OperationRemove         OperationType = "remove"
+	OperationCreateOrUpdate OperationType = "create-or-update"
+	OperationUpdate         OperationType = "update"
+
+	// This one will soon be deprecated.
+	OperationAdd OperationType = "add"
 )
 
 type Operation struct {

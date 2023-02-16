@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -35,5 +35,7 @@ type Operation struct {
 	// Send one Operation per server and use Server instead.
 	Servers []string
 
-	Server string
+	Port     uint32
+	Protocol string
+	Server   string
 }

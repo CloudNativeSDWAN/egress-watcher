@@ -20,6 +20,7 @@ package controllers
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/rs/zerolog"
@@ -95,11 +96,13 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 	for _, currHost := range currParsedHosts {
 		currHosts[currHost] = true
 	}
+	currProto, currPort := getServiceEntryPortocolAndPort(curr.Spec.Ports)
 
 	oldHosts := map[string]bool{}
 	for _, oldHost := range oldParsedHosts {
 		oldHosts[oldHost] = true
 	}
+	oldProto, oldPort := getServiceEntryPortocolAndPort(old.Spec.Ports)
 
 	shouldWatchNow := shouldWatchLabel(curr.Labels, s.options.WatchAllServiceEntries)
 	shouldWatchBefore := shouldWatchLabel(old.Labels, s.options.WatchAllServiceEntries)
@@ -113,7 +116,6 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 		// Wasn't being watched and still isn't
 	case old.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL &&
 		curr.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL:
-
 		// Wasn't MESH_EXTERNAL and still isn't
 	case old.Spec.Resolution != netv1b1.ServiceEntry_DNS &&
 		curr.Spec.Resolution != netv1b1.ServiceEntry_DNS:
@@ -144,10 +146,12 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 
 	if remove, reason := mustBeRemoved(); remove {
 		l.Info().Str("reason", reason).Msg("sending delete...")
-		s.opsChan <- &sdwan.Operation{
-			Type:            sdwan.OperationRemove,
-			ApplicationName: curr.Name,
-			Servers:         oldParsedHosts,
+		for host := range oldHosts {
+			s.opsChan <- &sdwan.Operation{
+				Type:            sdwan.OperationRemove,
+				ApplicationName: curr.Name,
+				Server:          host,
+			}
 		}
 		return
 	}
@@ -174,11 +178,13 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 
 	// ... and add the new ones
 	for host := range currHosts {
-		if _, exists := oldHosts[host]; !exists {
+		if _, exists := oldHosts[host]; !exists || (currProto != oldProto || currPort != oldPort) {
 			s.opsChan <- &sdwan.Operation{
 				Type:            sdwan.OperationCreateOrUpdate,
 				ApplicationName: curr.Name,
 				Server:          host,
+				Protocol:        currProto,
+				Port:            currPort,
 			}
 		}
 	}
@@ -252,11 +258,14 @@ func (s *serviceEntryEventHandler) Create(ce event.CreateEvent, wq workqueue.Rat
 		return
 	}
 
+	protocol, port := getServiceEntryPortocolAndPort(se.Spec.Ports)
 	for _, host := range parsedHosts {
 		s.opsChan <- &sdwan.Operation{
 			Type:            sdwan.OperationCreateOrUpdate,
 			ApplicationName: se.Name,
 			Server:          host,
+			Port:            port,
+			Protocol:        protocol,
 		}
 	}
 }
@@ -287,4 +296,35 @@ func getHosts(se *vb1.ServiceEntry) (hosts []string) {
 	}
 
 	return hosts
+}
+
+func getServiceEntryPortocolAndPort(ports []*netv1b1.Port) (string, uint32) {
+	var (
+		protocol string
+		port     uint32
+	)
+
+	for _, sePort := range ports {
+		switch strings.ToLower(sePort.Protocol) {
+		case "https":
+			// HTTPS has the priority
+			return "https", sePort.Number
+		case "http":
+			// HTTP has second priority: is stored but not returned because
+			// we want to see if maybe we also have https in other iterations.
+			protocol, port = "http", sePort.Number
+		case "mongo":
+			// mongo is not supported
+			continue
+		default:
+			if protocol == "" {
+				// Everything else has lowest priority, so it will be added
+				// only if http is not there.
+				protocol, port = "https", sePort.Number
+			}
+		}
+
+	}
+
+	return protocol, port
 }

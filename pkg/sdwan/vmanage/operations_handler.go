@@ -109,7 +109,7 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 			log.Info().
 				Str("type", string(op.Type)).
 				Str("name", op.ApplicationName).
-				Strs("hosts", op.Servers).
+				Str("host", op.Server).
 				Msg("received operation request")
 
 			if len(ops) == 0 {
@@ -142,7 +142,7 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 
 func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Operation) {
 	// First create any custom applications
-	applicationsToEnable := o.handleCreateOps(ctx, operations)
+	applicationsToEnable := o.handleCreateUpdateOps(ctx, operations)
 
 	// Get the *names* of the applications to disable
 	applicationsToDisable := func() (disable []string) {
@@ -151,9 +151,7 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 				continue
 			}
 
-			for _, host := range op.Servers {
-				disable = append(disable, replaceDots(host))
-			}
+			disable = append(disable, replaceDots(op.Server))
 		}
 
 		return
@@ -211,7 +209,7 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 	o.log.Info().Msg("all done")
 }
 
-func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations []*sdwan.Operation) []string {
+func (o *OperationsHandler) handleCreateUpdateOps(mainCtx context.Context, operations []*sdwan.Operation) []string {
 	appListsToEnable := []string{}
 
 	// ----------------------------------------
@@ -224,38 +222,35 @@ func (o *OperationsHandler) handleCreateOps(mainCtx context.Context, operations 
 		// pass only the relevant data to the create, update, or delete
 		// functions. We're not going to have thousands of operations to
 		// justify an algorithm like that, so we just skip them instead.
-		if op.Type != sdwan.OperationAdd {
+		if op.Type != sdwan.OperationCreateOrUpdate {
 			continue
 		}
 
-		for _, serverName := range op.Servers {
-			// -- First create the application
-			appID, err := func() (string, error) {
-				ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
-				defer canc()
+		// -- First create the application
+		appID, err := func() (string, error) {
+			ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
+			defer canc()
 
-				return o.createCustomApplication(ctx, serverName)
-			}()
-			if err != nil {
-				// logging is done in the function
-				continue
-			}
-
-			// -- Then create the custom application list
-			_, err = func() (string, error) {
-				ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
-				defer canc()
-
-				return o.createCustomApplicationList(ctx, serverName, appID)
-			}()
-			if err != nil {
-				// logging is done in the function
-				// TODO: delete the custom application if this didn't go right.
-				continue
-			}
-
-			appListsToEnable = append(appListsToEnable, replaceDots(serverName))
+			return o.createUpdateCustomApplication(ctx, op.Server)
+		}()
+		if err != nil {
+			// logging is done in the function
+			continue
 		}
+
+		// -- Then create the custom application list
+		_, err = func() (string, error) {
+			ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
+			defer canc()
+
+			return o.createCustomApplicationList(ctx, op.Server, appID)
+		}()
+		if err != nil {
+			// logging is done in the function
+			continue
+		}
+
+		appListsToEnable = append(appListsToEnable, replaceDots(op.Server))
 	}
 
 	return appListsToEnable
@@ -269,9 +264,7 @@ func (o *OperationsHandler) handleRemoveOps(mainCtx context.Context, operations 
 				continue
 			}
 
-			for _, serverName := range op.Servers {
-				toRemoveMap[replaceDots(serverName)] = true
-			}
+			toRemoveMap[replaceDots(op.Server)] = true
 		}
 
 		return toRemoveMap
@@ -295,7 +288,7 @@ func (o *OperationsHandler) handleRemoveOps(mainCtx context.Context, operations 
 	// and associated custom applications
 	// ----------------------------------------
 
-	o.log.Info().Msg("deleting custom application lists...")
+	o.log.Debug().Msg("deleting custom application lists...")
 	for _, list := range listIds {
 		if list.ReferenceCount > 0 {
 			o.log.Warn().
@@ -349,26 +342,18 @@ func replaceDots(hostName string) string {
 		"*", "_")
 }
 
-func (o *OperationsHandler) createCustomApplication(ctx context.Context, serverName string) (string, error) {
+func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, serverName string) (string, error) {
 	name := replaceDots(serverName)
 	l := o.log.With().Str("name", name).Str("hostname", serverName).Logger()
+	var appID *string
 
 	// -- First, check if it already exists
 	existing, err := o.client.CustomApplications().GetByName(ctx, name)
 	switch {
 	case err == nil:
-		l.Info().Msg("a custom application with this name already exists")
-
-		for _, servName := range existing.ServerNames {
-			if servName == serverName {
-				return existing.ID, nil
-			}
-		}
-
-		l.Warn().Msg("existing custom application does not contain server " +
-			"name included in resource")
-
-		return existing.ID, nil
+		appID = &existing.ID
+		l.Info().Str("existing-id", *appID).
+			Msg("updating existing application...")
 	case !errors.Is(err, verrors.ErrorNotFound):
 		l.Err(err).
 			Msg("cannot check if application already exists: skipping...")
@@ -378,20 +363,32 @@ func (o *OperationsHandler) createCustomApplication(ctx context.Context, serverN
 		l.Debug().Msg("creating custom application...")
 	}
 
-	// -- Create the custom application
-	appID, err := o.client.CustomApplications().
-		Create(ctx, customapp.CreateUpdateOptions{
-			Name:        name,
-			ServerNames: []string{serverName},
-			// TODO: handle IPs, protocol and port
-			L3L4Attributes: customapp.L3L4Attributes{},
-		})
+	opts := customapp.CreateUpdateOptions{
+		Name:        name,
+		ServerNames: []string{serverName},
+		// TODO: handle IPs, protocol and port
+		L3L4Attributes: customapp.L3L4Attributes{},
+	}
+
+	// -- Create/update the custom application
+	if appID == nil {
+		appID, err = o.client.CustomApplications().Create(ctx, opts)
+		if err != nil {
+			l.Info().Str("application-id", *appID).
+				Msg("custom application successfully created")
+		}
+	} else {
+		err = o.client.CustomApplications().Update(ctx, *appID, opts)
+		if err != nil {
+			l.Info().Str("application-id", *appID).
+				Msg("custom application successfully updated")
+		}
+	}
+
 	if err != nil {
 		return "", err
 	}
 
-	l.Info().Str("application-id", *appID).
-		Msg("custom application successfully created")
 	return *appID, nil
 }
 

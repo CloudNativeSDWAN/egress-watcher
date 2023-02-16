@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -243,7 +243,7 @@ func (o *OperationsHandler) handleCreateUpdateOps(mainCtx context.Context, opera
 			ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
 			defer canc()
 
-			return o.createCustomApplicationList(ctx, op.Server, appID)
+			return o.createUpdateCustomApplicationList(ctx, appID, op)
 		}()
 		if err != nil {
 			// logging is done in the function
@@ -352,7 +352,7 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, s
 	switch {
 	case err == nil:
 		appID = &existing.ID
-		l.Info().Str("existing-id", *appID).
+		l.Debug().Str("existing-id", *appID).
 			Msg("updating existing application...")
 	case !errors.Is(err, verrors.ErrorNotFound):
 		l.Err(err).
@@ -370,49 +370,75 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, s
 		L3L4Attributes: customapp.L3L4Attributes{},
 	}
 
-	// -- Create/update the custom application
+	// -- Create the custom application
 	if appID == nil {
 		appID, err = o.client.CustomApplications().Create(ctx, opts)
 		if err != nil {
-			l.Info().Str("application-id", *appID).
-				Msg("custom application successfully created")
+			return "", err
 		}
-	} else {
-		err = o.client.CustomApplications().Update(ctx, *appID, opts)
-		if err != nil {
-			l.Info().Str("application-id", *appID).
-				Msg("custom application successfully updated")
-		}
-	}
 
-	if err != nil {
-		return "", err
+		l.Info().Str("application-id", *appID).
+			Msg("custom application successfully created")
+
+	} else {
+		o.client.CustomApplications().Update(ctx, *appID, opts)
+		if err != nil {
+			return "", err
+		}
+
+		l.Info().Str("application-id", *appID).
+			Msg("custom application successfully updated")
 	}
 
 	return *appID, nil
 }
 
-func (o *OperationsHandler) createCustomApplicationList(ctx context.Context, serverName, appID string) (string, error) {
-	name := replaceDots(serverName)
+func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Context, appID string, op *sdwan.Operation) (string, error) {
+	name := replaceDots(op.Server)
 	l := o.log.With().Str("name", name).Logger()
+	probe, probeValue := func() (applist.ProbeType, string) {
+		switch op.Protocol {
+		case "https":
+			return applist.URLProbe, "https://" + op.Server
+		case "http":
+			return applist.URLProbe, "http://" + op.Server
+		default:
+			return applist.FQDNProbe, op.Server
+		}
+	}()
+
+	var appListID *string
 
 	// -- First, check if it already exists
 	existing, err := o.client.ApplicationLists().GetByName(ctx, name)
 	switch {
 	case err == nil:
-		l.Info().Msg("a custom application list with this name already exists")
-
+		idFound := false
 		for _, apps := range existing.Applications {
 			if apps.ID == appID {
-				return "", nil
+				idFound = true
+				break
 			}
 		}
 
-		l.Warn().Str("application-id", appID).
-			Msg("existing custom application list does not include " +
-				"requested application ID: no further action will be taken")
-		return "", fmt.Errorf("custom application list does not include " +
-			"app ID")
+		if idFound {
+			if existing.Probe.Type == probe && existing.Probe.Value == probeValue {
+				// everything is the same, nothing to do here.
+				l.Info().Str("id", *appListID).
+					Msg("custom application list already exists but no " +
+						"changes have been detected: skipping...")
+				return existing.ID, nil
+			}
+
+			appListID = &existing.ID
+			l.Debug().Str("id", *appListID).Msg("updating existing custom application...")
+		} else {
+			l.Warn().Str("application-id", appID).
+				Msg("existing custom application list does not include " +
+					"requested application ID: no further action will be taken")
+			return existing.ID, fmt.Errorf("custom application list does not include " +
+				"app ID")
+		}
 
 	case !errors.Is(err, verrors.ErrorNotFound):
 		l.Err(err).
@@ -425,29 +451,42 @@ func (o *OperationsHandler) createCustomApplicationList(ctx context.Context, ser
 		l.Debug().Msg("creating custom application list...")
 	}
 
-	applistID, err := o.client.ApplicationLists().
-		Create(ctx, applist.CreateUpdateOptions{
-			Name:        name,
-			Description: customAppListDesc,
-			Applications: []applist.Application{
-				{
-					Name: name,
-					ID:   appID,
-				},
+	createUpdateOpts := applist.CreateUpdateOptions{
+		Name:        name,
+		Description: customAppListDesc,
+		Applications: []applist.Application{
+			{
+				Name: name,
+				ID:   appID,
 			},
-			// TODO: provide a way to define custom probes.
-			Probe: applist.Probe{
-				Type:  applist.FQDNProbe,
-				Value: serverName,
-			},
-		})
-
-	if err != nil {
-		l.Err(err).Msg("cannot create custom application list")
-		return "", fmt.Errorf("cannot create custom application list: %w", err)
+		},
+		Probe: applist.Probe{
+			Type:  probe,
+			Value: probeValue,
+		},
 	}
 
-	return *applistID, nil
+	if appListID == nil {
+		appListID, err = o.client.ApplicationLists().
+			Create(ctx, createUpdateOpts)
+		if err != nil {
+			return "", err
+		}
+
+		l.Info().Str("id", *appListID).
+			Msg("custom application created successfully")
+	} else {
+		err = o.client.ApplicationLists().
+			Update(ctx, *appListID, createUpdateOpts)
+		if err != nil {
+			return "", err
+		}
+
+		l.Info().Str("id", *appListID).
+			Msg("custom application updated successfully")
+	}
+
+	return *appListID, nil
 }
 
 func (o *OperationsHandler) activatePolicies(ctx context.Context, appsToAdd, appsToRemove []string) {

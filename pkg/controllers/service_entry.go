@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -159,21 +159,28 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 	l.Info().
 		Strs("new-hosts", currParsedHosts).
 		Strs("old-hosts", oldParsedHosts).
-		Msg("sending update...")
+		Msg("sending updates...")
 
-	// TODO: this must be improved with an actual update
-	// First, delete...
-	s.opsChan <- &sdwan.Operation{
-		Type:            sdwan.OperationRemove,
-		ApplicationName: curr.Name,
-		Servers:         oldParsedHosts,
+	// Delete the ones that are not there anymore...
+	for host := range oldHosts {
+		if _, exists := currHosts[host]; !exists {
+			s.opsChan <- &sdwan.Operation{
+				Type:            sdwan.OperationRemove,
+				ApplicationName: curr.Name,
+				Server:          host,
+			}
+		}
 	}
 
-	// ... then, add
-	s.opsChan <- &sdwan.Operation{
-		Type:            sdwan.OperationAdd,
-		ApplicationName: curr.Name,
-		Servers:         currParsedHosts,
+	// ... and add the new ones
+	for host := range currHosts {
+		if _, exists := oldHosts[host]; !exists {
+			s.opsChan <- &sdwan.Operation{
+				Type:            sdwan.OperationCreateOrUpdate,
+				ApplicationName: curr.Name,
+				Server:          host,
+			}
+		}
 	}
 }
 
@@ -203,10 +210,12 @@ func (s *serviceEntryEventHandler) Delete(de event.DeleteEvent, wq workqueue.Rat
 		return
 	}
 
-	s.opsChan <- &sdwan.Operation{
-		Type:            sdwan.OperationRemove,
-		ApplicationName: se.Name,
-		Servers:         parsedHosts,
+	for _, host := range parsedHosts {
+		s.opsChan <- &sdwan.Operation{
+			Type:            sdwan.OperationRemove,
+			ApplicationName: se.Name,
+			Server:          host,
+		}
 	}
 }
 
@@ -243,10 +252,12 @@ func (s *serviceEntryEventHandler) Create(ce event.CreateEvent, wq workqueue.Rat
 		return
 	}
 
-	s.opsChan <- &sdwan.Operation{
-		Type:            sdwan.OperationAdd,
-		ApplicationName: se.Name,
-		Servers:         parsedHosts,
+	for _, host := range parsedHosts {
+		s.opsChan <- &sdwan.Operation{
+			Type:            sdwan.OperationCreateOrUpdate,
+			ApplicationName: se.Name,
+			Server:          host,
+		}
 	}
 }
 

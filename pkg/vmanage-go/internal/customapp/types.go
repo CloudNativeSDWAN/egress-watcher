@@ -29,7 +29,7 @@ import (
 type InternalCustomApplication struct {
 	AppID               string         `json:"appId,omitempty"`
 	AppName             string         `json:"appName"`
-	ServerNames         []string       `json:"serverNames"`
+	ServerNames         []string       `json:"serverNames,omitempty"`
 	LastUpdated         string         `json:"lastUpdated,omitempty"`
 	Owner               string         `json:"owner,omitempty"`
 	L3L4Attributes      []InternalL3L4 `json:"L3L4,omitempty"`

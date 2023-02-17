@@ -115,7 +115,8 @@ func (c *customApplicationsOps) Create(ctx context.Context, opts ca.CreateUpdate
 	if opts.Name == "" {
 		return nil, verrors.ErrorNoNameProvided
 	}
-	if len(opts.ServerNames) == 0 {
+
+	if len(opts.ServerNames) == 0 && (len(opts.L3L4Attributes.TCP) == 0 && len(opts.L3L4Attributes.UDP) == 0) {
 		return nil, verrors.ErrorNoServerNamesProvided
 	}
 

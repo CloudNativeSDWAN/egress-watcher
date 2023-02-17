@@ -110,7 +110,20 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 				Str("type", string(op.Type)).
 				Str("name", op.ApplicationName).
 				Str("host", op.Server).
+				Strs("ips", op.IPs).
 				Msg("received operation request")
+
+			op.ApplicationName = func() string {
+				// Rewriting application name...
+				// TODO: in future versions we will probably have either a
+				// separated, internal struct or re-use this one but have the
+				// new name as a separated field.
+				if op.Server != "" {
+					return replaceDots(op.Server)
+				}
+
+				return op.ApplicationName
+			}()
 
 			if len(ops) == 0 {
 				if o.waitingWindow > 0 {
@@ -151,7 +164,7 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 				continue
 			}
 
-			disable = append(disable, replaceDots(op.Server))
+			disable = append(disable, op.ApplicationName)
 		}
 
 		return
@@ -231,7 +244,7 @@ func (o *OperationsHandler) handleCreateUpdateOps(mainCtx context.Context, opera
 			ctx, canc := context.WithTimeout(mainCtx, 30*time.Second)
 			defer canc()
 
-			return o.createUpdateCustomApplication(ctx, op.Server)
+			return o.createUpdateCustomApplication(ctx, op)
 		}()
 		if err != nil {
 			// logging is done in the function
@@ -250,7 +263,7 @@ func (o *OperationsHandler) handleCreateUpdateOps(mainCtx context.Context, opera
 			continue
 		}
 
-		appListsToEnable = append(appListsToEnable, replaceDots(op.Server))
+		appListsToEnable = append(appListsToEnable, op.ApplicationName)
 	}
 
 	return appListsToEnable
@@ -264,7 +277,7 @@ func (o *OperationsHandler) handleRemoveOps(mainCtx context.Context, operations 
 				continue
 			}
 
-			toRemoveMap[replaceDots(op.Server)] = true
+			toRemoveMap[op.ApplicationName] = true
 		}
 
 		return toRemoveMap
@@ -342,13 +355,12 @@ func replaceDots(hostName string) string {
 		"*", "_")
 }
 
-func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, serverName string) (string, error) {
-	name := replaceDots(serverName)
-	l := o.log.With().Str("name", name).Str("hostname", serverName).Logger()
+func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, op *sdwan.Operation) (string, error) {
+	l := o.log.With().Str("name", op.ApplicationName).Logger()
 	var appID *string
 
 	// -- First, check if it already exists
-	existing, err := o.client.CustomApplications().GetByName(ctx, name)
+	existing, err := o.client.CustomApplications().GetByName(ctx, op.ApplicationName)
 	switch {
 	case err == nil:
 		appID = &existing.ID
@@ -363,12 +375,28 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, s
 		l.Debug().Msg("creating custom application...")
 	}
 
-	opts := customapp.CreateUpdateOptions{
-		Name:        name,
-		ServerNames: []string{serverName},
-		// TODO: handle IPs, protocol and port
-		L3L4Attributes: customapp.L3L4Attributes{},
-	}
+	opts := func() customapp.CreateUpdateOptions {
+		o := customapp.CreateUpdateOptions{
+			Name: op.ApplicationName,
+		}
+
+		if op.Server != "" {
+			o.ServerNames = []string{op.Server}
+			return o
+		}
+
+		o.L3L4Attributes = customapp.L3L4Attributes{
+			TCP: []customapp.IPsAndPorts{
+				{
+					IPs: op.IPs,
+					Ports: &customapp.Ports{
+						Values: []int32{int32(op.Port)},
+					},
+				},
+			},
+		}
+		return o
+	}()
 
 	// -- Create the custom application
 	if appID == nil {
@@ -394,9 +422,17 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, s
 }
 
 func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Context, appID string, op *sdwan.Operation) (string, error) {
-	name := replaceDots(op.Server)
-	l := o.log.With().Str("name", name).Logger()
+	l := o.log.With().Str("name", op.ApplicationName).Logger()
 	probe, probeValue := func() (applist.ProbeType, string) {
+		if len(op.IPs) > 0 {
+			ip := op.IPs[0]
+			if strings.Contains(ip, "/") {
+				ip = strings.Split(op.IPs[0], "/")[0]
+			}
+
+			return applist.IPProbe, ip
+		}
+
 		switch op.Protocol {
 		case "https":
 			return applist.URLProbe, "https://" + op.Server
@@ -410,7 +446,7 @@ func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Contex
 	var appListID *string
 
 	// -- First, check if it already exists
-	existing, err := o.client.ApplicationLists().GetByName(ctx, name)
+	existing, err := o.client.ApplicationLists().GetByName(ctx, op.ApplicationName)
 	switch {
 	case err == nil:
 		idFound := false
@@ -452,11 +488,11 @@ func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Contex
 	}
 
 	createUpdateOpts := applist.CreateUpdateOptions{
-		Name:        name,
+		Name:        op.ApplicationName,
 		Description: customAppListDesc,
 		Applications: []applist.Application{
 			{
-				Name: name,
+				Name: op.ApplicationName,
 				ID:   appID,
 			},
 		},
@@ -474,7 +510,7 @@ func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Contex
 		}
 
 		l.Info().Str("id", *appListID).
-			Msg("custom application created successfully")
+			Msg("custom application list created successfully")
 	} else {
 		err = o.client.ApplicationLists().
 			Update(ctx, *appListID, createUpdateOpts)
@@ -483,7 +519,7 @@ func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Contex
 		}
 
 		l.Info().Str("id", *appListID).
-			Msg("custom application updated successfully")
+			Msg("custom application list updated successfully")
 	}
 
 	return *appListID, nil

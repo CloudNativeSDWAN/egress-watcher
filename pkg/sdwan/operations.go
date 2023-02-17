@@ -35,6 +35,7 @@ type Operation struct {
 	// Send one Operation per server and use Server instead.
 	Servers []string
 
+	IPs      []string
 	Port     uint32
 	Protocol string
 	Server   string

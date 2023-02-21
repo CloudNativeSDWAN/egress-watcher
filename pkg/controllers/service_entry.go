@@ -20,13 +20,11 @@ package controllers
 import (
 	"context"
 	"fmt"
-	"strings"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/rs/zerolog"
 	netv1b1 "istio.io/api/networking/v1beta1"
 	vb1 "istio.io/client-go/pkg/apis/networking/v1beta1"
-	"k8s.io/apimachinery/pkg/util/validation"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -89,20 +87,20 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 		return
 	}
 
-	currParsedHosts := getHosts(curr)
-	oldParsedHosts := getHosts(old)
+	currParsedHosts := getHostsFromServiceEntry(curr)
+	oldParsedHosts := getHostsFromServiceEntry(old)
 
 	currHosts := map[string]bool{}
 	for _, currHost := range currParsedHosts {
 		currHosts[currHost] = true
 	}
-	currProto, currPort := getServiceEntryPortocolAndPort(curr.Spec.Ports)
+	currProto, currPort := getProtocolAndPortFromServiceEntry(curr.Spec.Ports)
 
 	oldHosts := map[string]bool{}
 	for _, oldHost := range oldParsedHosts {
 		oldHosts[oldHost] = true
 	}
-	oldProto, oldPort := getServiceEntryPortocolAndPort(old.Spec.Ports)
+	oldProto, oldPort := getProtocolAndPortFromServiceEntry(old.Spec.Ports)
 
 	shouldWatchNow := shouldWatchLabel(curr.Labels, s.options.WatchAllServiceEntries)
 	shouldWatchBefore := shouldWatchLabel(old.Labels, s.options.WatchAllServiceEntries)
@@ -147,9 +145,10 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 	if remove, reason := mustBeRemoved(); remove {
 		l.Info().Str("reason", reason).Msg("sending delete...")
 		for host := range oldHosts {
+			name := replaceDots(host)
 			s.opsChan <- &sdwan.Operation{
 				Type:            sdwan.OperationRemove,
-				ApplicationName: curr.Name,
+				ApplicationName: name,
 				Server:          host,
 			}
 		}
@@ -167,10 +166,11 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 
 	// Delete the ones that are not there anymore...
 	for host := range oldHosts {
+		name := replaceDots(host)
 		if _, exists := currHosts[host]; !exists {
 			s.opsChan <- &sdwan.Operation{
 				Type:            sdwan.OperationRemove,
-				ApplicationName: curr.Name,
+				ApplicationName: name,
 				Server:          host,
 			}
 		}
@@ -178,11 +178,12 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 
 	// ... and add the new ones
 	for host := range currHosts {
+		name := replaceDots(host)
 		if _, exists := oldHosts[host]; !exists || (currProto != oldProto || currPort != oldPort) {
 			s.opsChan <- &sdwan.Operation{
 				Type:            sdwan.OperationCreateOrUpdate,
 				ApplicationName: curr.Name,
-				Server:          host,
+				Server:          name,
 				Protocol:        currProto,
 				Port:            currPort,
 			}
@@ -210,16 +211,17 @@ func (s *serviceEntryEventHandler) Delete(de event.DeleteEvent, wq workqueue.Rat
 		return
 	}
 
-	parsedHosts := getHosts(se)
+	parsedHosts := getHostsFromServiceEntry(se)
 	if len(parsedHosts) == 0 {
 		// Didn't have any valid hosts anyways.
 		return
 	}
 
 	for _, host := range parsedHosts {
+		name := replaceDots(host)
 		s.opsChan <- &sdwan.Operation{
 			Type:            sdwan.OperationRemove,
-			ApplicationName: se.Name,
+			ApplicationName: name,
 			Server:          host,
 		}
 	}
@@ -239,7 +241,7 @@ func (s *serviceEntryEventHandler) Create(ce event.CreateEvent, wq workqueue.Rat
 		return
 	}
 
-	parsedHosts := getHosts(se)
+	parsedHosts := getHostsFromServiceEntry(se)
 	if len(parsedHosts) == 0 {
 		l.Debug().Msg("no valid hosts detected: skipping...")
 		return
@@ -258,11 +260,12 @@ func (s *serviceEntryEventHandler) Create(ce event.CreateEvent, wq workqueue.Rat
 		return
 	}
 
-	protocol, port := getServiceEntryPortocolAndPort(se.Spec.Ports)
+	protocol, port := getProtocolAndPortFromServiceEntry(se.Spec.Ports)
 	for _, host := range parsedHosts {
+		name := replaceDots(host)
 		s.opsChan <- &sdwan.Operation{
 			Type:            sdwan.OperationCreateOrUpdate,
-			ApplicationName: se.Name,
+			ApplicationName: name,
 			Server:          host,
 			Port:            port,
 			Protocol:        protocol,
@@ -275,56 +278,4 @@ func (s *serviceEntryEventHandler) Generic(ge event.GenericEvent, wq workqueue.R
 	// We don't really know what to do with generic events.
 	// We will just ignore this.
 	wq.Done(ge.Object)
-}
-
-func shouldWatchLabel(labels map[string]string, watchAllByDefault bool) bool {
-	switch labels[watchLabel] {
-	case watchEnabledLabel:
-		return true
-	case watchDisabledLabel:
-		return false
-	default:
-		return watchAllByDefault
-	}
-}
-
-func getHosts(se *vb1.ServiceEntry) (hosts []string) {
-	for _, host := range se.Spec.Hosts {
-		if len(validation.IsDNS1123Subdomain(host)) == 0 {
-			hosts = append(hosts, host)
-		}
-	}
-
-	return hosts
-}
-
-func getServiceEntryPortocolAndPort(ports []*netv1b1.Port) (string, uint32) {
-	var (
-		protocol string
-		port     uint32
-	)
-
-	for _, sePort := range ports {
-		switch strings.ToLower(sePort.Protocol) {
-		case "https":
-			// HTTPS has the priority
-			return "https", sePort.Number
-		case "http":
-			// HTTP has second priority: is stored but not returned because
-			// we want to see if maybe we also have https in other iterations.
-			protocol, port = "http", sePort.Number
-		case "mongo":
-			// mongo is not supported
-			continue
-		default:
-			if protocol == "" {
-				// Everything else has lowest priority, so it will be added
-				// only if http is not there.
-				protocol, port = "https", sePort.Number
-			}
-		}
-
-	}
-
-	return protocol, port
 }

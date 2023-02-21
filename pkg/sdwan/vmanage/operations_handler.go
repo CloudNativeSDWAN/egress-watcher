@@ -113,18 +113,6 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 				Strs("ips", op.IPs).
 				Msg("received operation request")
 
-			op.ApplicationName = func() string {
-				// Rewriting application name...
-				// TODO: in future versions we will probably have either a
-				// separated, internal struct or re-use this one but have the
-				// new name as a separated field.
-				if op.Server != "" {
-					return replaceDots(op.Server)
-				}
-
-				return op.ApplicationName
-			}()
-
 			if len(ops) == 0 {
 				if o.waitingWindow > 0 {
 					log.Info().Str("waiting-duration", o.waitingWindow.String()).Msg("starting waiting mode")
@@ -343,16 +331,6 @@ func (o *OperationsHandler) handleRemoveOps(mainCtx context.Context, operations 
 			}
 		}
 	}
-}
-
-// replaceDots replaces all the dots in a name with underscores.
-//
-// This is just a shorthand function used to return a suitable application
-// or application list name from a server name.
-func replaceDots(hostName string) string {
-	return strings.ReplaceAll(
-		strings.ReplaceAll(hostName, ".", "_"),
-		"*", "_")
 }
 
 func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, op *sdwan.Operation) (string, error) {

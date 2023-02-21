@@ -149,7 +149,7 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 			s.opsChan <- &sdwan.Operation{
 				Type:            sdwan.OperationRemove,
 				ApplicationName: name,
-				Server:          host,
+				Hosts:           []string{host},
 			}
 		}
 		return
@@ -171,7 +171,7 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 			s.opsChan <- &sdwan.Operation{
 				Type:            sdwan.OperationRemove,
 				ApplicationName: name,
-				Server:          host,
+				Hosts:           []string{host},
 			}
 		}
 	}
@@ -182,8 +182,8 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 		if _, exists := oldHosts[host]; !exists || (currProto != oldProto || currPort != oldPort) {
 			s.opsChan <- &sdwan.Operation{
 				Type:            sdwan.OperationCreateOrUpdate,
-				ApplicationName: curr.Name,
-				Server:          name,
+				ApplicationName: name,
+				Hosts:           []string{host},
 				Protocol:        currProto,
 				Port:            currPort,
 			}
@@ -222,7 +222,7 @@ func (s *serviceEntryEventHandler) Delete(de event.DeleteEvent, wq workqueue.Rat
 		s.opsChan <- &sdwan.Operation{
 			Type:            sdwan.OperationRemove,
 			ApplicationName: name,
-			Server:          host,
+			Hosts:           []string{host},
 		}
 	}
 }
@@ -266,7 +266,7 @@ func (s *serviceEntryEventHandler) Create(ce event.CreateEvent, wq workqueue.Rat
 		s.opsChan <- &sdwan.Operation{
 			Type:            sdwan.OperationCreateOrUpdate,
 			ApplicationName: name,
-			Server:          host,
+			Hosts:           []string{host},
 			Port:            port,
 			Protocol:        protocol,
 		}

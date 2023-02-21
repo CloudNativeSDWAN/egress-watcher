@@ -109,7 +109,7 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 			log.Info().
 				Str("type", string(op.Type)).
 				Str("name", op.ApplicationName).
-				Str("host", op.Server).
+				Strs("hosts", op.Hosts).
 				Strs("ips", op.IPs).
 				Msg("received operation request")
 
@@ -358,8 +358,8 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, o
 			Name: op.ApplicationName,
 		}
 
-		if op.Server != "" {
-			o.ServerNames = []string{op.Server}
+		if len(op.Hosts) > 0 {
+			o.ServerNames = op.Hosts
 			return o
 		}
 
@@ -413,11 +413,11 @@ func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Contex
 
 		switch op.Protocol {
 		case "https":
-			return applist.URLProbe, "https://" + op.Server
+			return applist.URLProbe, "https://" + op.Hosts[0]
 		case "http":
-			return applist.URLProbe, "http://" + op.Server
+			return applist.URLProbe, "http://" + op.Hosts[0]
 		default:
-			return applist.FQDNProbe, op.Server
+			return applist.FQDNProbe, op.Hosts[0]
 		}
 	}()
 

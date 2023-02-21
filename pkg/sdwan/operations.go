@@ -31,12 +31,11 @@ const (
 type Operation struct {
 	Type            OperationType
 	ApplicationName string
-	// DEPRECATED: only one server is allowed per custom application.
-	// Send one Operation per server and use Server instead.
+	// DEPRECATED: use Hosts instead
 	Servers []string
 
 	IPs      []string
 	Port     uint32
 	Protocol string
-	Server   string
+	Hosts    []string
 }

@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,189 +14,303 @@
 // limitations under the License.
 //
 // SPDX-License-Identifier: Apache-2.0
+//
+// Credit to @chowndarya for the original work and functions created here.
 
 package command
 
 import (
 	"context"
+	"fmt"
+	"syscall"
+	"time"
 
+	"github.com/enescakir/emoji"
+	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 	appsv1 "k8s.io/api/apps/v1"
-	apiv1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
-const (
-	namespaceName       = "egress-watcher"
-	serviceAccountName  = "egress-watcher-service-account"
-	clusterRole         = "egress-watcher-role"
-	clusterRoleBinding  = "egress-watcher-role-binding"
-	applicationSettings = "egress-watcher-settings"
-)
+type installer struct {
+	namespace string
+	name      string
+	clientset *kubernetes.Clientset
 
-func createNamespace(clientset *kubernetes.Clientset, usernamespace string) error {
-	ns := &apiv1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: usernamespace,
-		},
-	}
-	_, err := clientset.CoreV1().Namespaces().Create(context.TODO(), ns, metav1.CreateOptions{})
-	return err
+	namespaceExisted bool
+	saExisted        bool
 
+	clusterRoleName        string
+	clusterRoleBindingName string
+	serviceAccountName     string
+	secretName             string
+	settingsName           string
 }
 
-func createServiceAccount(clientset *kubernetes.Clientset, usernamespace, name string) error {
-	servacc := &apiv1.ServiceAccount{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ServiceAccount",
-			APIVersion: "v1",
+func newInstaller(clientset *kubernetes.Clientset, namespace, name string) (*installer, error) {
+	if clientset == nil {
+		return nil, fmt.Errorf("no clientset provided")
+	}
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
+	if name == "" {
+		name = defaultName
+	}
+
+	inst := newInstallerWithNames(name)
+	inst.namespace = namespace
+	inst.clientset = clientset
+
+	// Check if namespace already exists
+	nsExisted, err := func() (bool, error) {
+		ctx, canc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer canc()
+
+		_, err := clientset.CoreV1().Namespaces().Get(ctx, namespace, metav1.GetOptions{})
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return false, nil
+			}
+
+			return false, err
+		}
+
+		return true, nil
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("cannot check if namespace %s already exists: %w", namespace, err)
+	}
+	if nsExisted {
+		inst.namespaceExisted = nsExisted
+		return inst, nil
+	}
+
+	// Check if service account already exists
+	saExisted, err := func() (bool, error) {
+		ctx, canc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer canc()
+
+		_, err := clientset.CoreV1().ServiceAccounts(namespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			if k8serrors.IsNotFound(err) {
+				return false, nil
+			}
+
+			return false, err
+		}
+
+		return true, nil
+	}()
+	if err != nil {
+		return nil, fmt.Errorf("cannot check if service account %s already exists: %w", inst.serviceAccountName, err)
+	}
+
+	inst.saExisted = saExisted
+	return inst, nil
+}
+
+func newInstallerWithNames(name string) *installer {
+	return &installer{
+		name:                   name,
+		clusterRoleName:        name + "-cluster-role",
+		clusterRoleBindingName: name + "-cluster-role-binding",
+		serviceAccountName:     name + "-service-account",
+		secretName:             name + "-credentials",
+		settingsName:           name + "-settings",
+	}
+}
+
+func (i *installer) install(ctx context.Context, containerImage string, opts Options) error {
+	// Array of functions to execute for installing
+	installers := []func(context.Context) error{
+		i.createClusterRole,
+		i.createClusterRoleBinding,
+		i.createNamespace,
+		i.createServiceAccount,
+		func(ctx context.Context) error {
+			return i.createSecret(ctx, opts)
 		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      serviceAccountName,
-			Namespace: usernamespace,
+		func(ctx context.Context) error {
+			return i.createConfigMap(ctx, opts)
+		},
+		func(ctx context.Context) error {
+			return i.createDeployment(ctx, containerImage)
 		},
 	}
 
-	_, err := clientset.CoreV1().ServiceAccounts(usernamespace).Create(context.TODO(), servacc, metav1.CreateOptions{})
-	return err
+	// Array of resources for printing
+	resources := []string{
+		"cluster role",
+		"cluster role binding",
+		"namespace",
+		"service account",
+		"secret",
+		"config map",
+		"deployment",
+	}
 
+	for index, inst := range installers {
+		fmt.Printf("creating %s...", resources[index])
+
+		if err := inst(ctx); err != nil {
+			fmt.Println(" ", emoji.CrossMark, err)
+			i.cleanUp(ctx)
+			return err
+		}
+
+		fmt.Println(" ", emoji.CheckMarkButton)
+	}
+
+	return nil
 }
 
-func createClusterRole(clientset *kubernetes.Clientset, usernamespace, name string) error {
+func (i *installer) createClusterRole(ctx context.Context) (err error) {
 	cr := &rbacv1.ClusterRole{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ClusterRole",
-			APIVersion: "rbac.authorization.k8s.io/v1",
-		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      clusterRole,
-			Namespace: usernamespace,
+			Name:      i.clusterRoleName,
+			Namespace: i.namespace,
 		},
 		Rules: []rbacv1.PolicyRule{
 			{
-				APIGroups: []string{
-					"networking.istio.io"},
+				APIGroups: []string{"networking.istio.io"},
 				Resources: []string{"serviceentries"},
-				Verbs: []string{
-					"watch",
-					"get",
-					"list",
-				},
+				Verbs:     []string{"watch", "get", "list"},
+			},
+			{
+				APIGroups: []string{"networking.k8s.io"},
+				Resources: []string{"networkpolicies"},
+				Verbs:     []string{"watch", "get", "list"},
 			},
 		},
 	}
 
-	_, err := clientset.RbacV1().ClusterRoles().Create(context.TODO(), cr, metav1.CreateOptions{})
-	return err
-
+	_, err = i.clientset.RbacV1().ClusterRoles().
+		Create(ctx, cr, metav1.CreateOptions{})
+	return
 }
 
-func createClusterRoleBinding(clientset *kubernetes.Clientset, usernamespace, name string) error {
+func (i *installer) createClusterRoleBinding(ctx context.Context) (err error) {
 	crb := &rbacv1.ClusterRoleBinding{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ClusterRoleBinding",
-			APIVersion: "rbac.authorization.k8s.io/v1",
-		},
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      clusterRoleBinding,
-			Namespace: usernamespace,
+			Name:      i.clusterRoleBindingName,
+			Namespace: i.namespace,
 		},
 		RoleRef: rbacv1.RoleRef{
 			APIGroup: "rbac.authorization.k8s.io",
 			Kind:     "ClusterRole",
-			Name:     clusterRole,
+			Name:     i.clusterRoleName,
 		},
 		Subjects: []rbacv1.Subject{
 			{
 				Kind:      "ServiceAccount",
-				Name:      serviceAccountName,
-				Namespace: usernamespace,
+				Name:      i.serviceAccountName,
+				Namespace: i.namespace,
 			},
 		},
 	}
 
-	_, err := clientset.RbacV1().ClusterRoleBindings().Create(context.TODO(), crb, metav1.CreateOptions{})
-	return err
-
+	_, err = i.clientset.RbacV1().ClusterRoleBindings().
+		Create(ctx, crb, metav1.CreateOptions{})
+	return
 }
 
-func createConfigMap(clientset *kubernetes.Clientset, opt Options, usernamespace, name string) error {
+func (i *installer) createNamespace(ctx context.Context) (err error) {
+	_, err = i.clientset.CoreV1().Namespaces().
+		Create(ctx, &v1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: i.namespace,
+			},
+		}, metav1.CreateOptions{})
 
-	yaml_opt, _ := yaml.Marshal(opt)
-	cm := apiv1.ConfigMap{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "ConfigMap",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      applicationSettings,
-			Namespace: usernamespace,
-		},
-
-		Data: map[string]string{
-			usersettingsfilename: string(yaml_opt),
-		},
-	}
-
-	_, err := clientset.CoreV1().ConfigMaps(usernamespace).Create(context.TODO(), &cm, metav1.CreateOptions{})
-	return err
-
+	return
 }
 
-func createSecret(clientset *kubernetes.Clientset, usernamespace, name string, opt Options) error {
-	secr := &apiv1.Secret{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Secret",
-			APIVersion: "v1",
-		},
+func (i *installer) createServiceAccount(ctx context.Context) (err error) {
+	_, err = i.clientset.CoreV1().ServiceAccounts(i.namespace).Create(context.TODO(), &v1.ServiceAccount{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: usernamespace,
+			Name:      i.serviceAccountName,
+			Namespace: i.namespace,
+		},
+	}, metav1.CreateOptions{})
+
+	return
+}
+
+func (i *installer) createSecret(ctx context.Context, opts Options) (err error) {
+	secret := &v1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      i.secretName,
+			Namespace: i.namespace,
 		},
 		Data: map[string][]byte{
-			"username": []byte(opt.Sdwan.Authentication.Username),
-			"password": []byte(opt.Sdwan.Authentication.Password),
+			"username": []byte(opts.Sdwan.Authentication.Username),
+			"password": []byte(opts.Sdwan.Authentication.Password),
 		},
 		Type: "Opaque",
 	}
 
-	_, err := clientset.CoreV1().Secrets(usernamespace).Create(context.TODO(), secr, metav1.CreateOptions{})
-	return err
-
+	_, err = i.clientset.CoreV1().Secrets(i.namespace).
+		Create(ctx, secret, metav1.CreateOptions{})
+	return
 }
 
-func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernamespace string, image string) error {
-	deploymentsClient := clientset.AppsV1().Deployments(usernamespace)
+func (i *installer) createConfigMap(ctx context.Context, opts Options) (err error) {
+	yamlOpts, err := yaml.Marshal(opts)
+	if err != nil {
+		return fmt.Errorf("cannot marshal options to yaml: %w", err)
+	}
+
+	_, err = i.clientset.CoreV1().
+		ConfigMaps(i.namespace).Create(ctx, &v1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      i.settingsName,
+			Namespace: i.namespace,
+		},
+
+		Data: map[string]string{
+			"settings.yaml": string(yamlOpts),
+		},
+	}, metav1.CreateOptions{})
+	return
+}
+
+func (i *installer) createDeployment(ctx context.Context, containerImage string) (err error) {
+	deploymentsClient := i.clientset.AppsV1().Deployments(i.namespace)
+	configVolumeName := "config-volume"
 
 	deployment := &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      namespaceName,
-			Namespace: usernamespace,
+			Name:      i.name,
+			Namespace: i.namespace,
 			Labels: map[string]string{
-				"app": namespaceName},
+				"app": defaultName,
+			},
 		},
 		Spec: appsv1.DeploymentSpec{
-			//Replicas: "2",
 			Selector: &metav1.LabelSelector{
 				MatchLabels: map[string]string{
-					"app": namespaceName,
+					"app": defaultName,
 				},
 			},
-			Template: apiv1.PodTemplateSpec{
+			Template: v1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{
 					Labels: map[string]string{
-						"app": namespaceName,
+						"app": defaultName,
 					},
 				},
-				Spec: apiv1.PodSpec{
-					Containers: []apiv1.Container{
+				Spec: v1.PodSpec{
+
+					Containers: []v1.Container{
 						{
-							Name:            namespaceName,
-							Image:           image,
-							ImagePullPolicy: "Always",
+							Name:            i.namespace,
+							Image:           containerImage,
+							ImagePullPolicy: v1.PullAlways,
 							Args: []string{
 								"run",
 								"with-vmanage",
@@ -205,97 +319,144 @@ func createDeployment(clientset *kubernetes.Clientset, sdwan_url string, usernam
 								"--sdwan.password=$(SDWAN_PASSWORD)",
 								"—verbosity=0",
 							},
-							VolumeMounts: []apiv1.VolumeMount{
+							VolumeMounts: []v1.VolumeMount{
 								{
-									Name:      "config-volume",
+									Name:      configVolumeName,
 									MountPath: "/settings",
 								},
 							},
-							Resources: apiv1.ResourceRequirements{
-								Limits: apiv1.ResourceList{
-									"cpu":    resource.MustParse("200m"),
+							Resources: v1.ResourceRequirements{
+								Limits: v1.ResourceList{
 									"memory": resource.MustParse("100Mi"),
 								},
-
-								Requests: apiv1.ResourceList{
+								Requests: v1.ResourceList{
 									"cpu":    resource.MustParse("100m"),
 									"memory": resource.MustParse("50Mi"),
 								},
 							},
 
-							Env: []apiv1.EnvVar{{
-								Name: "SDWAN_USERNAME",
-								ValueFrom: &apiv1.EnvVarSource{
-									SecretKeyRef: &apiv1.SecretKeySelector{
-										LocalObjectReference: apiv1.LocalObjectReference{
-											Name: "vmanage-credentials",
+							Env: []v1.EnvVar{
+								{
+									Name: "SDWAN_USERNAME",
+									ValueFrom: &v1.EnvVarSource{
+										SecretKeyRef: &v1.SecretKeySelector{
+											LocalObjectReference: v1.LocalObjectReference{
+												Name: i.secretName,
+											},
+											Key: "username",
 										},
-										Key: "username",
 									},
-								}},
+								},
 
 								{
 									Name: "SDWAN_PASSWORD",
-									ValueFrom: &apiv1.EnvVarSource{
-										SecretKeyRef: &apiv1.SecretKeySelector{
-											LocalObjectReference: apiv1.LocalObjectReference{
-												Name: "vmanage-credentials",
+									ValueFrom: &v1.EnvVarSource{
+										SecretKeyRef: &v1.SecretKeySelector{
+											LocalObjectReference: v1.LocalObjectReference{
+												Name: i.secretName,
 											},
 											Key: "password",
 										},
-									}},
-							},
-						}},
-
-					Volumes: []apiv1.Volume{
-						{Name: "config-volume",
-							VolumeSource: apiv1.VolumeSource{
-								ConfigMap: &apiv1.ConfigMapVolumeSource{
-									LocalObjectReference: apiv1.LocalObjectReference{
-										Name: applicationSettings},
+									},
 								},
 							},
 						},
 					},
-					ServiceAccountName: serviceAccountName,
+
+					Volumes: []v1.Volume{
+						{
+							Name: configVolumeName,
+							VolumeSource: v1.VolumeSource{
+								ConfigMap: &v1.ConfigMapVolumeSource{
+									LocalObjectReference: v1.LocalObjectReference{
+										Name: i.settingsName,
+									},
+								},
+							},
+						},
+					},
+					ServiceAccountName: i.serviceAccountName,
 				},
 			},
 		},
 	}
 
-	// Create Deployment
-	_, err := deploymentsClient.Create(context.TODO(), deployment, metav1.CreateOptions{})
-	return err
-
+	_, err = deploymentsClient.Create(ctx, deployment, metav1.CreateOptions{})
+	return
 }
 
-func cleanUP(clientset *kubernetes.Clientset, objecttype int) error {
-
-	for i := 0; i <= objecttype; i++ {
-
-		switch i {
-
-		case 0:
-			err := clientset.RbacV1().ClusterRoles().Delete(context.TODO(), clusterRole, metav1.DeleteOptions{})
-			if err != nil {
-				return err
+func (i *installer) cleanUp(ctx context.Context) error {
+	// Array of functions that remove a resource.
+	removers := []func(context.Context) error{
+		func(ctx context.Context) error {
+			return i.clientset.RbacV1().ClusterRoles().
+				Delete(context.TODO(), i.clusterRoleName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.RbacV1().ClusterRoleBindings().
+				Delete(context.TODO(), i.clusterRoleBindingName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.AppsV1().Deployments(i.namespace).
+				Delete(context.TODO(), i.name, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			if i.saExisted {
+				return nil
 			}
-
-		case 1:
-			err := clientset.RbacV1().ClusterRoleBindings().Delete(context.TODO(), clusterRoleBinding, metav1.DeleteOptions{})
-			if err != nil {
-				return err
+			return i.clientset.CoreV1().ServiceAccounts(i.namespace).
+				Delete(context.TODO(), i.serviceAccountName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.CoreV1().ConfigMaps(i.namespace).
+				Delete(context.TODO(), i.settingsName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			return i.clientset.CoreV1().Secrets(i.namespace).
+				Delete(context.TODO(), i.secretName, metav1.DeleteOptions{})
+		},
+		func(ctx context.Context) error {
+			if i.namespaceExisted {
+				return nil
 			}
+			return i.clientset.CoreV1().Namespaces().
+				Delete(context.TODO(), i.namespace, metav1.DeleteOptions{})
+		},
+	}
 
-		case 2:
-			err := clientset.CoreV1().Namespaces().Delete(context.TODO(), namespaceName, metav1.DeleteOptions{})
-			if err != nil {
-				return err
-			}
+	// Array of resources type names, each of these maps to the same item
+	// on the previous one.
+	resources := []string{
+		"cluster role",
+		"cluster role binding",
+		"deployment",
+		"service account",
+		"config map",
+		"secret",
+		"namespace",
+	}
 
+	fmt.Println("undoing changes ", emoji.BackArrow)
+
+	// Remove each resource
+	for j, remover := range removers {
+		if err := remover(ctx); err != nil && !k8serrors.IsNotFound(err) {
+			fmt.Printf("could not delete %s: %s\n", resources[j], err)
 		}
-
 	}
 
 	return nil
+}
+
+func askForPassword() (pass string) {
+	for {
+		fmt.Print("Please enter your SDWAN password (input will be hidden): ")
+		bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
+		pass = string(bytePassword)
+		if pass != "" {
+			return
+		}
+
+		fmt.Println("password provided is invalid")
+	}
 }

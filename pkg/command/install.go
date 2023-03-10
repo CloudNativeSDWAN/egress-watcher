@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -18,45 +18,59 @@
 package command
 
 import (
+	"context"
 	"fmt"
 	"net/url"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
-	"github.com/rs/zerolog"
+	"github.com/google/go-github/github"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
 )
 
 const (
-	defaultNamespace     = "egress-watcher"
-	usersettingsfilename = "settings.yaml"
-	defaultImage         = "ghcr.io/cloudnativesdwan/egress-watcher:v0.3.0"
-	defaultWaitingWindow = 30 * time.Second
+	defaultNamespace             = "egress-watcher"
+	defaultContainerRegistryRepo = "ghcr.io/cloudnativesdwan/egress-watcher"
+	githubOrgName                = "CloudNativeSDWAN"
+	githubRepoName               = "egress-watcher"
+	defaultName                  = "egress-watcher"
+	defaultWaitingWindow         = 30 * time.Second
 )
 
-var log zerolog.Logger = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
-
 func getInstallCommand() *cobra.Command {
-	var (
-		interactive bool
-		user        string
-		pass        string
-		baseurl     string
-	)
+	interactive := false
+	waitingWindow := defaultWaitingWindow
+	containerImage := ""
+
+	opts := Options{
+		ServiceEntryController: &controllers.ServiceEntryOptions{
+			WatchAllServiceEntries: false,
+		},
+		NetworkPolicyController: &controllers.NetworkPolicyOptions{
+			WatchAllNetworkPolicies: false,
+		},
+
+		Sdwan: &sdwan.Options{
+			WaitingWindow: &waitingWindow,
+			BaseURL:       "",
+			Authentication: &sdwan.Authentication{
+				Username: "",
+				Password: "",
+			},
+			Insecure: false,
+		},
+	}
 
 	cmd := &cobra.Command{
 		Use:   "install [OPTIONS]",
-		Short: `Install the egress watcher in Kubernetes.This is an experimental feature.`,
+		Short: `Install the egress watcher in Kubernetes. This is an experimental feature.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			home := homedir.HomeDir()
 			if home == "" {
@@ -77,146 +91,105 @@ func getInstallCommand() *cobra.Command {
 				return fmt.Errorf("cannot get clientset: %w", err)
 			}
 
-			a := 30 * time.Second
-			opt := Options{
-				ServiceEntryController: &controllers.ServiceEntryOptions{
-					WatchAllServiceEntries: false,
-				},
-
-				Sdwan: &sdwan.Options{
-					WaitingWindow: &a,
-					BaseURL:       baseurl,
-					Authentication: &sdwan.Authentication{
-						Username: user,
-						Password: pass,
-					},
-				},
-			}
 			if interactive {
 				return installInteractivelyToK8s(clientset)
-			} else {
-
-				return install(clientset, defaultImage, opt)
 			}
 
+			opts.Sdwan.Authentication.Password = askForPassword()
+			return install(clientset, containerImage, opts)
+
 		},
-		Example: "install -i",
+		Example: "install --username myself --password password " +
+			"--base-url https://my-vmanage.com",
 	}
 
 	// Flags
+	// We use the same flag names as the run command to be consistent.
 	cmd.Flags().BoolVarP(&interactive,
 		"interactive", "i", false,
 		"whether to install interactively.")
-	cmd.Flags().StringVar(&user,
-		"username", "",
-		"the username for sdwan.")
-	cmd.Flags().StringVar(&pass,
-		"password", "",
-		"the password for sdwan.")
-	cmd.Flags().StringVar(&baseurl,
-		"base-url", "",
-		"the base url for sdwan.")
+	cmd.Flags().BoolVarP(&opts.ServiceEntryController.WatchAllServiceEntries,
+		"watch-all-service-entries", "w", false,
+		"whether to watch all service entries by default.")
+	cmd.Flags().BoolVarP(&opts.NetworkPolicyController.WatchAllNetworkPolicies,
+		"watch-all-network-policies", "n", false,
+		"whether to watch all service entries by default.")
+	cmd.Flags().StringVarP(&opts.Sdwan.BaseURL, "sdwan.base-url", "a", "",
+		"the base url where to send data.")
+	cmd.Flags().StringVar(&opts.Sdwan.Authentication.Username,
+		"sdwan.username", "", "username to authenticate as.")
+	cmd.Flags().BoolVar(&opts.Sdwan.Insecure,
+		"sdwan.insecure", false,
+		"whether to connect to the SD-WAN ignoring self signed certificates.")
+	cmd.Flags().IntVar(&opts.Verbosity,
+		"verbosity", 1,
+		"verbosity level, from 0 to 2.")
+	cmd.Flags().BoolVar(&opts.PrettyLogs,
+		"pretty-logs", false,
+		"whether to log data in a slower but human readable format.")
+	cmd.Flags().DurationVar(opts.Sdwan.WaitingWindow,
+		"waiting-window", sdwan.DefaultWaitingWindow,
+		"the duration of the waiting mode. Set this to 0 to disable it entirely.")
+	cmd.Flags().StringVar(&containerImage,
+		"image", "",
+		"the container's image. If blank, the latest official one will be used.")
 
 	return cmd
 }
 
-func install(clientset *kubernetes.Clientset, docker_image string, opt Options) error {
-
-	type deleteComponentStep int
-
-	const (
-		clusterRoleStep deleteComponentStep = iota
-		clusterRoleBindingStep
-		namespaceStep
-	)
-
-	logLevels := [3]zerolog.Level{
-		zerolog.DebugLevel,
-		zerolog.InfoLevel,
-		zerolog.ErrorLevel,
-	}
-
-	if opt.PrettyLogs {
-		log = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
-	} else {
-		log = zerolog.New(os.Stderr).With().Timestamp().Logger()
-	}
-	log = log.Level(logLevels[opt.Verbosity])
-	log.Info().Msg("Starting...")
-
-	log.Info().Msg("Attempting clusterrole creation")
-	if err := createClusterRole(clientset, defaultNamespace, "egress-watcher-role"); err != nil {
+func install(clientset *kubernetes.Clientset, containerImage string, opts Options) error {
+	inst, err := newInstaller(clientset, defaultNamespace, defaultName)
+	if err != nil {
 		return err
 	}
-	log.Info().Msg("ClusterRole created successfully")
 
-	log.Info().Msg("Attempting clusterrolebinding creation")
-	if err := createClusterRoleBinding(clientset, defaultNamespace, "egress-watcher-role-binding"); err != nil {
-		outputerr := cleanUP(clientset, int(clusterRoleStep))
-		if outputerr != nil {
-			log.Info().Msg("Could not delete a created resource")
+	if containerImage == "" {
+		// Get the latest tag image. We could just use "latest", but we don't
+		// like doing that as we prefer to have a clear idea of which version
+		// is installed.
+		latestOfficialTag, err := func() (string, error) {
+			ctx, canc := context.WithTimeout(context.Background(), 30*time.Second)
+			defer canc()
+
+			client := github.NewClient(nil)
+			rel, _, err := client.Repositories.GetLatestRelease(ctx, githubOrgName, githubRepoName)
+			if err != nil {
+				return "", err
+			}
+
+			return *rel.TagName, nil
+		}()
+		if err != nil {
+			return fmt.Errorf("cannot get latest release: %w", err)
 		}
-		return err
-	}
-	log.Info().Msg("ClusterRoleBinding created successfully")
 
-	log.Info().Msg("Attempting namespace creation")
-	if err := createNamespace(clientset, defaultNamespace); err != nil {
-		outputerr := cleanUP(clientset, int(clusterRoleBindingStep))
-		if outputerr != nil {
-			log.Err(outputerr).Msg("Could not delete a created resource")
-		}
-		return err
+		containerImage = fmt.Sprintf("%s:%s", defaultContainerRegistryRepo, latestOfficialTag)
 	}
-	log.Info().Msg("Namespace created successfully")
 
-	log.Info().Msg("Attempting secret creation")
-	if err := createSecret(clientset, defaultNamespace, "vmanage-credentials", opt); err != nil {
-		outputerr := cleanUP(clientset, int(namespaceStep))
-		if outputerr != nil {
-			log.Info().Msg("Could not delete a created resources")
-		}
-		return err
-	}
-	log.Info().Msg("Secret created successfully")
+	fmt.Println("using", containerImage)
 
-	log.Info().Msg("Attempting configmap creation ")
-	if err := createConfigMap(clientset, opt, defaultNamespace, "egress-watcher-settings"); err != nil {
-		outputerr := cleanUP(clientset, int(namespaceStep))
-		if outputerr != nil {
-			log.Info().Msg("Could not delete a created resource")
-		}
-		return err
-	}
-	log.Info().Msg("ConfigMap created successfully")
-
-	log.Info().Msg("Attempting serviceaccount creation")
-	if err := createServiceAccount(clientset, defaultNamespace, "egress-watcher-service-account"); err != nil {
-		outputerr := cleanUP(clientset, int(namespaceStep))
-		if outputerr != nil {
-			log.Info().Msg("Could not delete a created resource")
-		}
-		return err
-	}
-	log.Info().Msg("ServiceAccount created successfully")
-
-	log.Info().Msg("Attempting Deployment creation")
-	if err := createDeployment(clientset, "new-deployment", defaultNamespace, docker_image); err != nil {
-		outputerr := cleanUP(clientset, int(namespaceStep))
-		if outputerr != nil {
-			log.Info().Msg("Could not delete a created resource")
-		}
-		return err
-	}
-	log.Info().Msg("Deployment created successfully")
-
-	return nil
+	return inst.install(context.Background(), containerImage, opts)
 }
 
 func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
-	//take various inputs from user
+	askYesNo := func() bool {
+		// Utility function to ask for yes or no with no as default.
+		for {
+			var user_input string
+			fmt.Scanln(&user_input)
 
-	//Username
+			switch strings.ToLower(user_input) {
+			case "y":
+				return true
+			case "", "n":
+				return false
+			}
+
+			fmt.Printf("invalid input, please try again: [y/n] (default: n): ")
+		}
+	}
+
+	// Username
 	var sdwan_username string
 	for {
 		fmt.Print("Please enter your SDWAN username: ")
@@ -227,20 +200,11 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 		fmt.Println("username provided is invalid")
 	}
 
-	//Password
-	var sdwan_password string
-	for {
-		fmt.Print("Please enter your sdwan password (input will be hidden): ")
-		bytePassword, _ := term.ReadPassword(int(syscall.Stdin))
-		sdwan_password = string(bytePassword)
-		if sdwan_password != "" {
-			break
-		}
-		fmt.Println("password provided is invalid")
-	}
+	// Password
+	sdwan_password := askForPassword()
 	fmt.Println()
 
-	//Baseurl
+	// Base URL
 	var sdwan_base_url string
 	for {
 		fmt.Print("Please enter your SDWAN base URL, e.g. https://example.com: ")
@@ -266,28 +230,11 @@ func installInteractivelyToK8s(clientset *kubernetes.Clientset) error {
 		fmt.Println("Provided duration is invalid")
 	}
 
-	//self signed certificate
-	sdwan_insecure := false
-selfSignedCertificate:
-	for {
-		fmt.Print("Do you want to accept self-signed certificates? [y/n] (default: n): ")
-
-		var user_input string
-		fmt.Scanln(&user_input)
-
-		switch strings.ToLower(user_input) {
-		case "y":
-			sdwan_insecure = true
-			break selfSignedCertificate
-		case "", "n":
-			break selfSignedCertificate
-
-		}
-
-	}
+	// Self-signed certificates
+	fmt.Print("Do you want to accept self-signed certificates? [y/n] (default: n): ")
+	sdwan_insecure := askYesNo()
 
 	// Verbosity
-
 	sdwan_verbosity := defaultVerbosity
 	for {
 		var inputVerbosity string
@@ -309,57 +256,30 @@ selfSignedCertificate:
 		fmt.Println("Provided invalid verbosity value")
 	}
 
-	// PrettyLogs
-	sdwan_prettylogs := false
-prettyLogsInput:
-	for {
-		fmt.Print("Do you need pretty logs? [y/n] (default: n): ")
+	// Pretty logs
+	fmt.Print("Do you need human-readable logs? [y/n] (default: n): ")
+	sdwan_prettylogs := askYesNo()
 
-		var user_input string
-		fmt.Scanln(&user_input)
+	// Watch all service entries
+	fmt.Print("Do you want to watch all ServiceEntry resources? [y/n] (default: n): ")
+	watchAllServiceEntries := askYesNo()
 
-		switch strings.ToLower(user_input) {
-		case "y":
-			sdwan_prettylogs = true
-			break prettyLogsInput
-		case "", "n":
-			break prettyLogsInput
+	// Watch all network policies
+	fmt.Print("Do you want to watch all NetworkPolicy resources? [y/n] (default: n): ")
+	watchAllNetPols := askYesNo()
 
-		}
-	}
-
-	// Watch all services
-	watchall_serviceentries := false
-watchAllServicesInput:
-	for {
-		fmt.Print("Do you want to watch all ServiceEntry resources? [y/n] (default: n): ")
-
-		var user_input string
-		fmt.Scanln(&user_input)
-
-		switch strings.ToLower(user_input) {
-		case "y":
-			watchall_serviceentries = true
-			break watchAllServicesInput
-		case "", "n":
-			break watchAllServicesInput
-
-		}
-	}
-
-	//docker image
-	docker_image := defaultImage
-
-	fmt.Printf("Enter docker image (default: %s): ", defaultImage)
+	// Docker Image
+	dockerImage := ""
+	fmt.Printf("Enter docker image (press enter for latest official release): ")
 	var user_input string
 	fmt.Scanln(&user_input)
-	if user_input != "" {
-		docker_image = user_input
-	}
 
 	opt := Options{
 		ServiceEntryController: &controllers.ServiceEntryOptions{
-			WatchAllServiceEntries: watchall_serviceentries,
+			WatchAllServiceEntries: watchAllServiceEntries,
+		},
+		NetworkPolicyController: &controllers.NetworkPolicyOptions{
+			WatchAllNetworkPolicies: watchAllNetPols,
 		},
 
 		Sdwan: &sdwan.Options{
@@ -375,6 +295,6 @@ watchAllServicesInput:
 		Verbosity:  sdwan_verbosity,
 	}
 
-	return install(clientset, docker_image, opt)
-
+	fmt.Println()
+	return install(clientset, dockerImage, opt)
 }

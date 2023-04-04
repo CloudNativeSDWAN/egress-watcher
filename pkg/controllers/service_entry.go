@@ -23,7 +23,6 @@ import (
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/rs/zerolog"
-	netv1b1 "istio.io/api/networking/v1beta1"
 	vb1 "istio.io/client-go/pkg/apis/networking/v1beta1"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/util/workqueue"
@@ -87,72 +86,18 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 		return
 	}
 
-	currParsedHosts := getHostsFromServiceEntry(curr)
-	oldParsedHosts := getHostsFromServiceEntry(old)
-
-	currHosts := map[string]bool{}
-	for _, currHost := range currParsedHosts {
-		currHosts[currHost] = true
-	}
-	currProto, currPort := getProtocolAndPortFromServiceEntry(curr.Spec.Ports)
-
-	oldHosts := map[string]bool{}
-	for _, oldHost := range oldParsedHosts {
-		oldHosts[oldHost] = true
-	}
-	oldProto, oldPort := getProtocolAndPortFromServiceEntry(old.Spec.Ports)
-
-	shouldWatchNow := shouldWatchLabel(curr.Labels, s.options.WatchAllServiceEntries)
-	shouldWatchBefore := shouldWatchLabel(old.Labels, s.options.WatchAllServiceEntries)
-
-	// -----------------------------------------------
-	// Determine if this event should be skipped
-	// -----------------------------------------------
+	checkCurr := checkServiceEntry(curr, s.options)
+	checkOld := checkServiceEntry(old, s.options)
 
 	switch {
-	case !shouldWatchBefore && !shouldWatchNow:
-		// Wasn't being watched and still isn't
-	case old.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL &&
-		curr.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL:
-		// Wasn't MESH_EXTERNAL and still isn't
-	case old.Spec.Resolution != netv1b1.ServiceEntry_DNS &&
-		curr.Spec.Resolution != netv1b1.ServiceEntry_DNS:
-		// Wasn't DNS and still isn't
-	case len(oldHosts) == 0 && len(currHosts) == 0:
-		// Had no valid hosts and still hasn't
+	case !checkOld.passed && !checkCurr.passed:
 		return
-	}
-
-	// -----------------------------------------------
-	// Determine if we should remove this
-	// -----------------------------------------------
-
-	mustBeRemoved := func() (remove bool, reason string) {
-		switch {
-		case !shouldWatchNow:
-			remove, reason = true, "no watch enabled"
-		case curr.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL:
-			remove, reason = true, "MESH_INTERNAL detected"
-		case curr.Spec.Resolution != netv1b1.ServiceEntry_DNS:
-			remove, reason = true, "non-DNS resolution detected"
-		case len(currHosts) == 0:
-			remove, reason = true, "no valid hosts found"
-		}
-
-		return
-	}
-
-	if remove, reason := mustBeRemoved(); remove {
-		l.Info().Str("reason", reason).Msg("sending delete...")
-		for host := range oldHosts {
-			name := replaceDots(host)
-			s.opsChan <- &sdwan.Operation{
-				Type:            sdwan.OperationRemove,
-				ApplicationName: name,
-				Hosts:           []string{host},
-			}
-		}
-		return
+	case checkOld.passed && !checkCurr.passed:
+		l.Info().Str("reason", checkCurr.reason).Msg("sending delete...")
+		s.handleEvent(checkOld, sdwan.OperationRemove)
+	case !checkOld.passed && checkCurr.passed:
+		l.Info().Msg("sending create...")
+		s.handleEvent(checkOld, sdwan.OperationCreateOrUpdate)
 	}
 
 	// -----------------------------------------------
@@ -160,39 +105,38 @@ func (s *serviceEntryEventHandler) Update(ue event.UpdateEvent, wq workqueue.Rat
 	// -----------------------------------------------
 
 	l.Info().
-		Strs("new-hosts", currParsedHosts).
-		Strs("old-hosts", oldParsedHosts).
+		Strs("new-hosts", checkCurr.hosts).
+		Strs("old-hosts", checkOld.hosts).
 		Msg("sending updates...")
 
+	s.handleEvent(checkCurr, sdwan.OperationCreateOrUpdate)
+
 	// Delete the ones that are not there anymore...
-	for host := range oldHosts {
-		name := replaceDots(host)
-		if _, exists := currHosts[host]; !exists {
-			s.opsChan <- &sdwan.Operation{
-				Type:            sdwan.OperationRemove,
-				ApplicationName: name,
-				Hosts:           []string{host},
+	toRemove := checkServiceEntryResult{}
+	for _, oldHost := range checkOld.hosts {
+		found := false
+		for _, currHost := range checkCurr.hosts {
+			if oldHost == currHost {
+				found = true
+				break
 			}
+		}
+
+		if !found {
+			toRemove.hosts = append(toRemove.hosts, oldHost)
 		}
 	}
 
-	// ... and add the new ones
-	for host := range currHosts {
-		name := replaceDots(host)
-		if _, exists := oldHosts[host]; !exists || (currProto != oldProto || currPort != oldPort) {
-			s.opsChan <- &sdwan.Operation{
-				Type:            sdwan.OperationCreateOrUpdate,
-				ApplicationName: name,
-				Hosts:           []string{host},
-				Protocol:        currProto,
-				Port:            currPort,
-			}
-		}
+	if len(toRemove.hosts) > 0 {
+		toRemove.port = checkOld.port
+		toRemove.protocol = checkOld.protocol
+		s.handleEvent(toRemove, sdwan.OperationRemove)
 	}
 }
 
 // Delete handles delete events.
 func (s *serviceEntryEventHandler) Delete(de event.DeleteEvent, wq workqueue.RateLimitingInterface) {
+	l := s.log.With().Str("event-handler", "Delete").Logger()
 	defer wq.Done(de.Object)
 
 	se, ok := de.Object.(*vb1.ServiceEntry)
@@ -200,31 +144,13 @@ func (s *serviceEntryEventHandler) Delete(de event.DeleteEvent, wq workqueue.Rat
 		return
 	}
 
-	if !shouldWatchLabel(se.Labels, s.options.WatchAllServiceEntries) {
-		// Wasn't being watched anyways
+	check := checkServiceEntry(se, s.options)
+	if !check.passed {
+		l.Debug().Str("reason", check.reason).Msg("skipping service entry...")
 		return
 	}
 
-	if se.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL ||
-		se.Spec.Resolution != netv1b1.ServiceEntry_DNS {
-		// Wasn't being watched anyways
-		return
-	}
-
-	parsedHosts := getHostsFromServiceEntry(se)
-	if len(parsedHosts) == 0 {
-		// Didn't have any valid hosts anyways.
-		return
-	}
-
-	for _, host := range parsedHosts {
-		name := replaceDots(host)
-		s.opsChan <- &sdwan.Operation{
-			Type:            sdwan.OperationRemove,
-			ApplicationName: name,
-			Hosts:           []string{host},
-		}
-	}
+	s.handleEvent(check, sdwan.OperationRemove)
 }
 
 // Create handles create events.
@@ -237,38 +163,28 @@ func (s *serviceEntryEventHandler) Create(ce event.CreateEvent, wq workqueue.Rat
 		return
 	}
 
-	if !shouldWatchLabel(se.Labels, s.options.WatchAllServiceEntries) {
+	check := checkServiceEntry(se, s.options)
+	if !check.passed {
+		l.Debug().Str("reason", check.reason).Msg("skipping service entry...")
 		return
 	}
 
-	parsedHosts := getHostsFromServiceEntry(se)
-	if len(parsedHosts) == 0 {
-		l.Debug().Msg("no valid hosts detected: skipping...")
-		return
-	}
+	s.handleEvent(check, sdwan.OperationCreateOrUpdate)
+}
 
-	l = l.With().Strs("hosts", parsedHosts).Logger()
-	l.Info().Msg("reconciling service entry...")
-
-	if se.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL {
-		l.Info().Msg("service entry location is not MESH_EXTERNAL: skipping...")
-		return
-	}
-
-	if se.Spec.Resolution != netv1b1.ServiceEntry_DNS {
-		l.Info().Msg("service entry resolution is not DNS: skipping...")
-		return
-	}
-
-	protocol, port := getProtocolAndPortFromServiceEntry(se.Spec.Ports)
-	for _, host := range parsedHosts {
+func (s *serviceEntryEventHandler) handleEvent(res checkServiceEntryResult, eventType sdwan.OperationType) {
+	for _, host := range res.hosts {
 		name := replaceDots(host)
 		s.opsChan <- &sdwan.Operation{
-			Type:            sdwan.OperationCreateOrUpdate,
+			Type:            eventType,
 			ApplicationName: name,
-			Hosts:           []string{host},
-			Port:            port,
-			Protocol:        protocol,
+			Data: []*sdwan.L3L4Data{
+				{
+					Hosts:    []string{host},
+					Protocol: sdwan.Protocol(res.protocol),
+					Ports:    []uint32{res.port},
+				},
+			},
 		}
 	}
 }

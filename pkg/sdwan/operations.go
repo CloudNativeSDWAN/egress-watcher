@@ -28,14 +28,29 @@ const (
 	OperationAdd OperationType = "add"
 )
 
+type Protocol string
+
+// NON-EXHAUSTIVE
+const (
+	ProtocolTCP   Protocol = "tcp"
+	ProtocolUDP   Protocol = "udp"
+	ProtocolHTTPS Protocol = "https"
+	ProtocolHTTP  Protocol = "http"
+)
+
+type L3L4Data struct {
+	// One of IPs and Hosts should be there, not together.
+	IPs      []string
+	Hosts    []string
+	Ports    []uint32
+	Protocol Protocol
+}
+
 type Operation struct {
 	Type            OperationType
 	ApplicationName string
-	// DEPRECATED: use Hosts instead
+	// DEPRECATED: use L3L4 instead
 	Servers []string
 
-	IPs      []string
-	Port     uint32
-	Protocol string
-	Hosts    []string
+	Data []*L3L4Data
 }

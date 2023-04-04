@@ -14,19 +14,18 @@
 // limitations under the License.
 //
 // SPDX-License-Identifier: Apache-2.0
+//
+// Credits to @tomilashy for the original version of this controller.
 
 package controllers
 
 import (
 	"context"
 	"fmt"
-	"net"
-	"reflect"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/rs/zerolog"
 	netv1 "k8s.io/api/networking/v1"
-	"k8s.io/apimachinery/pkg/util/validation"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
 	"k8s.io/client-go/util/workqueue"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
@@ -38,7 +37,9 @@ import (
 
 const (
 	netPolsCtrlName string = "network-policy-event-handler"
-	errTooManyIPs   string = "exceeded number of supported IPs (8)"
+	// TODO: this error is now temporarily disabled, as it may be irrelevant
+	// now that we distinguish ports and protocols as well.
+	// errTooManyIPs   string = "exceeded number of supported IPs (8)"
 )
 
 type NetworkPolicyOptions struct {
@@ -87,99 +88,36 @@ func (n *netPolsEventHandler) Update(ue event.UpdateEvent, wq workqueue.RateLimi
 		return
 	}
 
-	currParsedIps := getIps(curr)
-	oldParsedIps := getIps(old)
+	oldData := getIpsAndPortsFromNetworkPolicy(old)
+	currData := getIpsAndPortsFromNetworkPolicy(curr)
 
-	currIps := map[string]bool{}
-	for _, currIp := range currParsedIps {
-		currIps[currIp] = true
-	}
+	oldWatch := shouldWatchLabel(curr.Labels, n.options.WatchAllNetworkPolicies)
+	currWatch := shouldWatchLabel(old.Labels, n.options.WatchAllNetworkPolicies)
 
-	oldIps := map[string]bool{}
-	for _, oldIp := range oldParsedIps {
-		oldIps[oldIp] = true
-	}
-
-	watchNow := shouldWatchLabel(curr.Labels, n.options.WatchAllNetworkPolicies)
-	watchedBefore := shouldWatchLabel(old.Labels, n.options.WatchAllNetworkPolicies)
-
-	if !watchNow {
-		if !watchedBefore {
-			return
-		}
-
-		l.Info().Str("reason", "no watch enabled").Msg("sending delete...")
-		n.opsChan <- &sdwan.Operation{
-			Type:            sdwan.OperationRemove,
-			ApplicationName: curr.Name,
-			Servers:         oldParsedIps,
-		}
+	if !oldWatch && !currWatch {
 		return
-	} else {
-		if watchedBefore {
-			if reflect.DeepEqual(currIps, oldIps) {
-				// Something did change in the network policy, but not in things
-				// that are relevant to us.
-				return
-			}
-
-			if len(currIps) > 8 {
-				if len(oldIps) > 8 {
-					return
-				}
-
-				l.Err(fmt.Errorf(errTooManyIPs)).
-					Msg("sending delete...")
-				n.opsChan <- &sdwan.Operation{
-					Type:            sdwan.OperationRemove,
-					ApplicationName: curr.Name,
-					Servers:         oldParsedIps,
-				}
-				return
-			}
-		} else {
-			if len(currIps) > 8 {
-				l.Err(fmt.Errorf(errTooManyIPs)).
-					Msg("invalid data in network policy, skipping...")
-				return
-			}
-		}
 	}
 
-	if len(currParsedIps) == 0 {
-		if len(oldParsedIps) == 0 {
-			return
-		}
+	if len(oldData) == 0 && len(currData) == 0 {
+		return
+	}
 
-		l.Info().Str("reason", "no valid hosts").Msg("sending delete...")
+	if (oldWatch && !currWatch) || (len(oldData) > 0 && len(currData) == 0) {
+		l.Info().Msg("sending delete...")
 		n.opsChan <- &sdwan.Operation{
 			Type:            sdwan.OperationRemove,
-			ApplicationName: curr.Name,
-			Servers:         oldParsedIps,
+			ApplicationName: old.Name,
+			Data:            oldData,
 		}
 
 		return
 	}
 
-	if watchedBefore {
-		// First, delete...
-		n.opsChan <- &sdwan.Operation{
-			Type:            sdwan.OperationRemove,
-			ApplicationName: curr.Name,
-			Servers:         oldParsedIps,
-		}
-	}
-
-	l.Info().Str("reason", "different IPs").
-		Strs("new-IPs", currParsedIps).
-		Strs("old-IPs", oldParsedIps).
-		Msg("sending update...")
-
-	// ... then, add
+	l.Info().Msg("sending update...")
 	n.opsChan <- &sdwan.Operation{
-		Type:            sdwan.OperationAdd,
+		Type:            sdwan.OperationCreateOrUpdate,
 		ApplicationName: curr.Name,
-		Servers:         currParsedIps,
+		Data:            currData,
 	}
 }
 
@@ -198,23 +136,16 @@ func (n *netPolsEventHandler) Delete(de event.DeleteEvent, wq workqueue.RateLimi
 		return
 	}
 
-	parsedIps := getIps(netpol)
-
-	if len(parsedIps) == 0 {
-		l.Debug().Msg("no valid IPs detected: skipping...")
+	data := getIpsAndPortsFromNetworkPolicy(netpol)
+	if len(data) == 0 {
+		l.Debug().Msg("no valid data detected: skipping...")
 		return
 	}
-
-	if len(parsedIps) > 8 {
-		return
-	}
-
-	l.Info().Msg("deleting...")
 
 	n.opsChan <- &sdwan.Operation{
 		Type:            sdwan.OperationRemove,
 		ApplicationName: netpol.Name,
-		Servers:         parsedIps,
+		Data:            data,
 	}
 }
 
@@ -233,25 +164,16 @@ func (n *netPolsEventHandler) Create(ce event.CreateEvent, wq workqueue.RateLimi
 		return
 	}
 
-	parsedIps := getIps(netpol)
-
-	if len(parsedIps) == 0 {
-		l.Debug().Msg("no valid IPs detected: skipping...")
+	data := getIpsAndPortsFromNetworkPolicy(netpol)
+	if len(data) == 0 {
+		l.Debug().Msg("no valid data detected: skipping...")
 		return
 	}
-
-	if len(parsedIps) > 8 {
-		l.Err(fmt.Errorf(errTooManyIPs)).
-			Msg("invalid data in network policy, skipping...")
-		return
-	}
-
-	l = l.With().Strs("IPs", parsedIps).Logger()
 
 	n.opsChan <- &sdwan.Operation{
-		Type:            sdwan.OperationAdd,
+		Type:            sdwan.OperationCreateOrUpdate,
 		ApplicationName: netpol.Name,
-		Servers:         parsedIps,
+		Data:            data,
 	}
 }
 
@@ -260,16 +182,4 @@ func (n *netPolsEventHandler) Generic(ge event.GenericEvent, wq workqueue.RateLi
 	// We don't really know what to do with generic events.
 	// We will just ignore this.
 	wq.Done(ge.Object)
-}
-
-func getIps(n *netv1.NetworkPolicy) (ips []string) {
-	for _, host := range n.Spec.Egress {
-		for _, ip := range host.To {
-			ipv4Addr, _, _ := net.ParseCIDR(ip.IPBlock.CIDR)
-			if len(validation.IsValidIP(ipv4Addr.String())) == 0 {
-				ips = append(ips, ipv4Addr.String())
-			}
-		}
-	}
-	return ips
 }

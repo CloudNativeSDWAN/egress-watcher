@@ -18,10 +18,14 @@
 package controllers
 
 import (
+	"net"
 	"strings"
 
+	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	netv1b1 "istio.io/api/networking/v1beta1"
 	vb1 "istio.io/client-go/pkg/apis/networking/v1beta1"
+	v1 "k8s.io/api/core/v1"
+	netv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -63,7 +67,7 @@ func getProtocolAndPortFromServiceEntry(ports []*netv1b1.Port) (string, uint32) 
 	)
 
 	for _, sePort := range ports {
-		switch strings.ToLower(sePort.Protocol) {
+		switch proto := strings.ToLower(sePort.Protocol); proto {
 		case "https":
 			// HTTPS has the priority
 			return "https", sePort.Number
@@ -78,11 +82,126 @@ func getProtocolAndPortFromServiceEntry(ports []*netv1b1.Port) (string, uint32) 
 			if protocol == "" {
 				// Everything else has lowest priority, so it will be added
 				// only if http is not there.
-				protocol, port = "https", sePort.Number
+				protocol, port = proto, sePort.Number
 			}
 		}
 
 	}
 
 	return protocol, port
+}
+
+type checkServiceEntryResult struct {
+	passed   bool
+	reason   string
+	protocol string
+	port     uint32
+	hosts    []string
+}
+
+func checkServiceEntry(se *vb1.ServiceEntry, opts *ServiceEntryOptions) (result checkServiceEntryResult) {
+	result = checkServiceEntryResult{}
+
+	if !shouldWatchLabel(se.Labels, opts.WatchAllServiceEntries) {
+		result.reason = "no watch label found"
+		return
+	}
+
+	if se.Spec.Location != netv1b1.ServiceEntry_MESH_EXTERNAL {
+		result.reason = "not a MESH_EXTERNAL"
+		return
+	}
+
+	if se.Spec.Resolution != netv1b1.ServiceEntry_DNS {
+		result.reason = "not a DNS"
+		return
+	}
+
+	parsedHosts := getHostsFromServiceEntry(se)
+	if len(parsedHosts) == 0 {
+		result.reason = "no valid hosts found"
+		return
+	}
+
+	result.passed = true
+	result.hosts = parsedHosts
+	result.protocol, result.port = getProtocolAndPortFromServiceEntry(se.Spec.Ports)
+	return
+}
+
+type ipsAndPorts struct {
+	ips []string
+	tcp []uint32
+	udp []uint32
+}
+
+// Credits to @tomilashy for the original work on this function.
+func getIpsAndPortsFromNetworkPolicy(n *netv1.NetworkPolicy) []*sdwan.L3L4Data {
+	ipPorts := []ipsAndPorts{}
+	for _, rule := range n.Spec.Egress {
+		ips := []string{}
+		tcpPorts := []uint32{}
+		udpPorts := []uint32{}
+
+		// Get the ports and protocols
+		for _, port := range rule.Ports {
+			portNumber := func() uint32 {
+				if port.Port != nil {
+					return uint32(port.Port.IntVal)
+				}
+
+				return 0
+			}()
+			if portNumber == 0 {
+				continue
+			}
+
+			switch *port.Protocol {
+			case v1.ProtocolTCP:
+				tcpPorts = append(tcpPorts, portNumber)
+			case v1.ProtocolUDP:
+				udpPorts = append(udpPorts, portNumber)
+			}
+		}
+
+		// Get the ips
+		for _, to := range rule.To {
+			if to.IPBlock != nil {
+				ipv4Addr, _, _ := net.ParseCIDR(to.IPBlock.CIDR)
+				if len(validation.IsValidIP(ipv4Addr.String())) == 0 {
+					ips = append(ips, ipv4Addr.String())
+				}
+			}
+		}
+
+		if len(ips) > 0 && (len(tcpPorts) > 0 || len(udpPorts) > 0) {
+			ipPorts = append(ipPorts, ipsAndPorts{
+				ips: ips,
+				tcp: tcpPorts,
+				udp: udpPorts,
+			})
+		}
+	}
+
+	data := []*sdwan.L3L4Data{}
+	for _, ipPort := range ipPorts {
+
+		if len(ipPort.tcp) > 0 {
+			data = append(data, &sdwan.L3L4Data{
+				IPs:      ipPort.ips,
+				Protocol: sdwan.ProtocolTCP,
+				Ports:    ipPort.tcp,
+			})
+		}
+
+		if len(ipPort.udp) > 0 {
+			data = append(data, &sdwan.L3L4Data{
+				IPs:      ipPort.ips,
+				Protocol: sdwan.ProtocolUDP,
+				Ports:    ipPort.udp,
+			})
+		}
+	}
+
+	return data
 }

@@ -29,14 +29,15 @@ import (
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/applist"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/approute"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/cloudx"
-	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/customapp"
 	verrors "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/errors"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go/pkg/status"
 	"github.com/rs/zerolog"
 )
 
 const (
-	customAppListDesc string = "Managed by Egress Watcher."
+	customAppListDesc = "Managed by Egress Watcher."
+	defaultHTTPSPort  = 443
+	defaultHTTPPort   = 80
 )
 
 // OperationsHandler receives operations from the controller in a general
@@ -109,9 +110,12 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 			log.Info().
 				Str("type", string(op.Type)).
 				Str("name", op.ApplicationName).
-				Strs("hosts", op.Hosts).
-				Strs("ips", op.IPs).
 				Msg("received operation request")
+
+			if err := checkOperation(op); err != nil {
+				log.Err(err).Msg("skipping operation")
+				continue
+			}
 
 			if len(ops) == 0 {
 				if o.waitingWindow > 0 {
@@ -123,6 +127,10 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 
 			ops = append(ops, op)
 			for len(opsChan) > 0 && o.waitingWindow == 0 {
+				if err := checkOperation(op); err != nil {
+					log.Err(err).Msg("skipping operation")
+					continue
+				}
 				// If the waiting window is disabled, then we will try to get
 				// all other pending operations from the channel. This way we
 				// can try to perform everything in bulk instead of one thing
@@ -353,33 +361,15 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, o
 		l.Debug().Msg("creating custom application...")
 	}
 
-	opts := func() customapp.CreateUpdateOptions {
-		o := customapp.CreateUpdateOptions{
-			Name: op.ApplicationName,
-		}
-
-		if len(op.Hosts) > 0 {
-			o.ServerNames = op.Hosts
-			return o
-		}
-
-		o.L3L4Attributes = customapp.L3L4Attributes{
-			TCP: []customapp.IPsAndPorts{
-				{
-					IPs: op.IPs,
-					Ports: &customapp.Ports{
-						Values: []int32{int32(op.Port)},
-					},
-				},
-			},
-		}
-		return o
-	}()
+	// We went through a check before, and now we're sure that we have
+	// either only hosts or IPs.
+	opts := buildCustomAppCreateUpdateOptions(op)
 
 	// -- Create the custom application
 	if appID == nil {
 		appID, err = o.client.CustomApplications().Create(ctx, opts)
 		if err != nil {
+			l.Err(err).Msg("cannot create custom application")
 			return "", err
 		}
 
@@ -389,6 +379,7 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, o
 	} else {
 		o.client.CustomApplications().Update(ctx, *appID, opts)
 		if err != nil {
+			l.Err(err).Msg("cannot update custom application")
 			return "", err
 		}
 
@@ -402,23 +393,73 @@ func (o *OperationsHandler) createUpdateCustomApplication(ctx context.Context, o
 func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Context, appID string, op *sdwan.Operation) (string, error) {
 	l := o.log.With().Str("name", op.ApplicationName).Logger()
 	probe, probeValue := func() (applist.ProbeType, string) {
-		if len(op.IPs) > 0 {
-			ip := op.IPs[0]
-			if strings.Contains(ip, "/") {
-				ip = strings.Split(op.IPs[0], "/")[0]
+		var probeType applist.ProbeType
+		value := ""
+
+		for _, data := range op.Data {
+			if len(data.IPs) > 0 {
+				// We went through a check before, and now we're sure that we have
+				// either only hosts or IPs.
+
+				ip := data.IPs[0]
+				if strings.Contains(ip, "/") {
+					ip = strings.Split(data.IPs[0], "/")[0]
+				}
+
+				return applist.IPProbe, ip
 			}
 
-			return applist.IPProbe, ip
+			switch data.Protocol {
+			case "https":
+				httpsPort := 0
+				for _, port := range data.Ports {
+					if port == defaultHTTPSPort {
+						httpsPort = defaultHTTPSPort
+						break
+					}
+
+					if port == defaultHTTPPort && httpsPort == 0 {
+						httpsPort = defaultHTTPPort
+					}
+				}
+				if httpsPort != defaultHTTPSPort {
+					l.Warn().
+						Int("expected-port", defaultHTTPSPort).
+						Int("found-port", httpsPort).
+						Msg("unexpected port found for HTTPs")
+				}
+				// HTTPS has higher priority
+				return applist.URLProbe, "https://" + data.Hosts[0]
+			case "http":
+				httpPort := 0
+				for _, port := range data.Ports {
+					if port == defaultHTTPPort {
+						httpPort = defaultHTTPPort
+						break
+					}
+
+					httpPort = defaultHTTPPort
+				}
+				if httpPort != defaultHTTPPort {
+					l.Warn().
+						Int("expected-port", defaultHTTPPort).
+						Int("found-port", httpPort).
+						Msg("unexpected port found for HTTPs")
+				}
+
+				// HTTP is to be kept only if we haven't found HTTPS yet.
+				probeType, value = applist.URLProbe, "http://"+data.Hosts[0]
+
+			default:
+				if value == "" {
+					// This has lower priority, only if we haven't found neither
+					// HTTP nor HTTPS
+					probeType, value = applist.FQDNProbe, data.Hosts[0]
+				}
+			}
 		}
 
-		switch op.Protocol {
-		case "https":
-			return applist.URLProbe, "https://" + op.Hosts[0]
-		case "http":
-			return applist.URLProbe, "http://" + op.Hosts[0]
-		default:
-			return applist.FQDNProbe, op.Hosts[0]
-		}
+		return probeType, value
 	}()
 
 	var appListID *string
@@ -427,6 +468,8 @@ func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Contex
 	existing, err := o.client.ApplicationLists().GetByName(ctx, op.ApplicationName)
 	switch {
 	case err == nil:
+		appListID = &existing.ID
+
 		idFound := false
 		for _, apps := range existing.Applications {
 			if apps.ID == appID {
@@ -444,7 +487,6 @@ func (o *OperationsHandler) createUpdateCustomApplicationList(ctx context.Contex
 				return existing.ID, nil
 			}
 
-			appListID = &existing.ID
 			l.Debug().Str("id", *appListID).Msg("updating existing custom application...")
 		} else {
 			l.Warn().Str("application-id", appID).

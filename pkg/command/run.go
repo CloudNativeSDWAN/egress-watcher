@@ -1,4 +1,4 @@
-// Copyright (c) 2022 Cisco Systems, Inc. and its affiliates
+// Copyright (c) 2022, 2023 Cisco Systems, Inc. and its affiliates
 // All rights reserved.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,32 +19,29 @@ package command
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
 	"os/signal"
 	"path"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/controllers"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan"
 	"github.com/CloudNativeSDWAN/egress-watcher/pkg/sdwan/vmanage"
-	"github.com/rs/zerolog"
+	vmanagego "github.com/CloudNativeSDWAN/egress-watcher/pkg/vmanage-go"
 	"github.com/spf13/cobra"
-	"gopkg.in/yaml.v3"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/util/homedir"
 )
 
-const (
-	defaultVerbosity int = 1
-)
-
 type kubeConfigOptions struct {
-	path    string
-	context string
+	path string
+	// TODO: on future maybe we could also support contexts.
 }
 
 type Options struct {
@@ -72,7 +69,8 @@ func getRunCommand() *cobra.Command {
 		},
 	}
 	fileOpts := &Options{
-		ServiceEntryController: &controllers.ServiceEntryOptions{},
+		ServiceEntryController:  &controllers.ServiceEntryOptions{},
+		NetworkPolicyController: &controllers.NetworkPolicyOptions{},
 		// We don't support having authentication in a file because that's
 		// sensitive information.
 		Sdwan: &sdwan.Options{
@@ -235,130 +233,88 @@ The following controllers are supported:
 }
 
 func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
-	var log zerolog.Logger
-	{
-		logLevels := [3]zerolog.Level{
-			zerolog.DebugLevel,
-			zerolog.InfoLevel,
-			zerolog.ErrorLevel,
+	// -- Init logs
+	log := initLogger(opts)
+	log.Info().Msg("starting...")
+
+	// -- Init vManage stuff
+	opHandler, err := func() (*vmanage.OperationsHandler, error) {
+		ctx, canc := context.WithTimeout(context.Background(), 10*time.Second)
+		defer canc()
+
+		vOpts := []vmanagego.ClientOption{}
+		if opts.Sdwan.Insecure {
+			vOpts = append(vOpts, vmanagego.WithSkipInsecure())
 		}
 
-		if opts.Verbosity < 0 || opts.Verbosity > 3 {
-			fmt.Println("invalid verbosity level provided, using default")
-			opts.Verbosity = defaultVerbosity
+		log.Info().Msg("getting client for vManage...")
+		vclient, err := vmanagego.NewClient(ctx, opts.Sdwan.BaseURL,
+			opts.Sdwan.Authentication.Username,
+			opts.Sdwan.Authentication.Password,
+			vOpts...)
+		if err != nil {
+			return nil, fmt.Errorf("cannot get vManage client: %w", err)
 		}
+		log.Info().Msg("successfully retrieved client for vManage")
 
-		if opts.PrettyLogs {
-			log = zerolog.New(zerolog.NewConsoleWriter()).With().Timestamp().Logger()
-		} else {
-			log = zerolog.New(os.Stderr).With().Timestamp().Logger()
-		}
-
-		log = log.Level(logLevels[opts.Verbosity])
-		log.Info().Msg("starting...")
-	}
-
-	mgr, err := controllers.NewManager(kopts.path)
+		return vmanage.NewOperationsHandler(vclient, *opts.Sdwan.WaitingWindow, log)
+	}()
 	if err != nil {
-		return fmt.Errorf("could not get manager: %w", err)
+		return fmt.Errorf("cannot start operations handler for "+
+			"vManager: %w", err)
 	}
 
+	// -- Init controllers data
+	opsChan := make(chan *sdwan.Operation, 100)
+	mgr, err := initControllers(opsChan, kopts, opts, log)
+	if err != nil {
+		return err
+	}
+
+	// -- Init stop channels
 	ctx, canc := context.WithCancel(context.Background())
 	stopChan := make(chan os.Signal, 1)
 	signal.Notify(stopChan, syscall.SIGINT, syscall.SIGTERM)
-	exitChan := make(chan struct{})
 
+	// -- Do the actual work
+	wg := sync.WaitGroup{}
+
+	wg.Add(1)
 	go func() {
-		var err error
-		defer func() {
-			if err != nil {
+		defer wg.Done()
+
+		if err := opHandler.WatchForOperations(ctx, opsChan); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				close(stopChan)
+				log.Err(err).Msg("error while watching for operations")
+			}
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		log.Info().Str("worker", "Controllers Manager").
+			Msg("starting controllers manager...")
+
+		if err := mgr.Start(ctx); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				log.Err(err).Msg("could not start manager")
 				close(stopChan)
 			}
-
-			close(exitChan)
-		}()
-
-		log.Info().Msg("getting client...")
-
-		vctx, vcanc := context.WithTimeout(ctx, 30*time.Second)
-		vclient, err := vmanage.NewClient(vctx, opts.Sdwan)
-		vcanc()
-		if err != nil {
-			log.Err(err).Msg("could not get client")
-			// TODO: probably use an error channel on future to make this fail.
-			return
 		}
-
-		opsChan := make(chan *sdwan.Operation, 100)
-		defer close(opsChan)
-
-		_, err = controllers.NewServiceEntryController(mgr, opts.ServiceEntryController, opsChan, log)
-		if err != nil {
-			log.Err(err).Msg("could not get controller")
-			return
-		}
-
-		_, err = controllers.NewNetworkPolicyController(mgr, opts.NetworkPolicyController, opsChan, log)
-		if err != nil {
-			log.Err(err).Msg("could not get controller")
-			return
-		}
-
-		exitWatch := make(chan struct{})
-		go func() {
-			defer close(exitWatch)
-
-			if err = vclient.WatchForOperations(ctx, opsChan, *opts.Sdwan.WaitingWindow, log); err != nil {
-				log.Err(err).Msg("error while watch for operations")
-				return
-			}
-		}()
-
-		log.Info().Msg("starting controller...")
-		if mgrErr := mgr.Start(ctx); mgrErr != nil {
-			log.Err(mgrErr).Msg("could not start manager")
-		}
-
-		<-exitWatch
 	}()
 
 	log.Info().Msg("working....")
 
+	// -- Graceful shutdown
 	<-stopChan
 	fmt.Println()
-	log.Info().Msg("exit requested")
+	log.Info().Msg("waiting for all workers to terminate...")
 
 	canc()
-	<-exitChan
-	log.Info().Msg("good bye!")
+	wg.Wait()
+	log.Info().Msg("done. Good bye!")
 
 	return nil
-}
-
-func getSettingsFromFile(settingsPath string) (*Options, error) {
-	file, err := os.Open(settingsPath)
-	switch {
-	case err == nil:
-		stat, err := file.Stat()
-		if err != nil {
-			return nil, fmt.Errorf("could not check file path: %w", err)
-		}
-
-		if stat.IsDir() {
-			return nil, fmt.Errorf("provided file path is a directory")
-		}
-	case os.IsNotExist(err):
-		return nil, fmt.Errorf("provided file path does not exist")
-	default:
-		return nil, fmt.Errorf("could not open file path: %w", err)
-	}
-
-	defer file.Close()
-
-	var settings Options
-	if err := yaml.NewDecoder(file).Decode(&settings); err != nil {
-		return nil, fmt.Errorf("could not unmarshal settings file: %w", err)
-	}
-
-	return &settings, nil
 }

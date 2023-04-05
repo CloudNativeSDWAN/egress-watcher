@@ -101,7 +101,6 @@ func (o *OperationsHandler) WatchForOperations(mainCtx context.Context, opsChan 
 
 		// -- Need to quit?
 		case <-mainCtx.Done():
-			log.Err(mainCtx.Err()).Msg("cancel requested")
 			waitingTimer.Stop()
 			return nil
 

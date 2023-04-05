@@ -60,7 +60,7 @@ func getHostsFromServiceEntry(se *vb1.ServiceEntry) (hosts []string) {
 	return hosts
 }
 
-func getProtocolAndPortFromServiceEntry(ports []*netv1b1.Port) (string, uint32) {
+func getProtocolAndPortFromServiceEntry(ports []*netv1b1.ServicePort) (string, uint32) {
 	var (
 		protocol string
 		port     uint32

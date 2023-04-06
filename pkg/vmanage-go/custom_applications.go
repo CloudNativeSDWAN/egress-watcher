@@ -145,6 +145,8 @@ func (c *customApplicationsOps) Create(ctx context.Context, opts ca.CreateUpdate
 
 // Update an existing application.
 // Note that empty and nil values will be filled with pre-existing values.
+// Note: protocols must always be there, otherwise an empty TCP or UDP option
+// in `L3L4Attributes` will be interpreted as a removal.
 func (c *customApplicationsOps) Update(ctx context.Context, id string, opts ca.CreateUpdateOptions) error {
 	existingApp, err := c.GetByID(ctx, id)
 	if err != nil {
@@ -152,22 +154,16 @@ func (c *customApplicationsOps) Update(ctx context.Context, id string, opts ca.C
 	}
 
 	// Defaults
-	updOpts := existingApp.GetCreateUpdateOptions()
+	existingOpts := existingApp.GetCreateUpdateOptions()
 
 	// Merge with the ones provided
 	// Note: this may need tougher validation, but we're going to let vManage
 	// do it for us.
 	if opts.Name != "" {
-		updOpts.Name = opts.Name
+		opts.Name = existingOpts.Name
 	}
-	if len(opts.ServerNames) == 0 {
-		updOpts.ServerNames = opts.ServerNames
-	}
-	if opts.L3L4Attributes.TCP != nil {
-		updOpts.L3L4Attributes.TCP = opts.L3L4Attributes.TCP
-	}
-	if opts.L3L4Attributes.UDP == nil {
-		updOpts.L3L4Attributes.UDP = opts.L3L4Attributes.UDP
+	if len(opts.ServerNames) > 0 {
+		opts.ServerNames = existingOpts.ServerNames
 	}
 
 	// Make the request

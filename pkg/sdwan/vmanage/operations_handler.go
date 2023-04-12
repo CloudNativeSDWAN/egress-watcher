@@ -46,25 +46,27 @@ const (
 type OperationsHandler struct {
 	client        *vmanagego.Client
 	waitingWindow time.Duration
+	enableApps    bool
 	log           zerolog.Logger
 }
 
 // NewOperationsHandler returns a new instance of the operations handler.
 //
 // It returns an error in case the client passed is nil or the waiting window
-// contains an invalid value -- usually a value <= 0.
-func NewOperationsHandler(client *vmanagego.Client, waitingWindow time.Duration, log zerolog.Logger) (*OperationsHandler, error) {
+// contains an invalid value -- usually a nil value or <= 0.
+func NewOperationsHandler(client *vmanagego.Client, opts sdwan.Options, log zerolog.Logger) (*OperationsHandler, error) {
 	if client == nil {
 		return nil, fmt.Errorf("vManage client passed is nil")
 	}
 
-	if waitingWindow <= 0 {
+	if opts.WaitingWindow == nil || (opts.WaitingWindow != nil && *opts.WaitingWindow <= 0) {
 		return nil, fmt.Errorf("invalid waiting window timer provided")
 	}
 
 	return &OperationsHandler{
 		client:        client,
-		waitingWindow: waitingWindow,
+		waitingWindow: *opts.WaitingWindow,
+		enableApps:    opts.Enable,
 		log:           log.With().Str("worker", "Operations Handler").Logger(),
 	}, nil
 }
@@ -165,49 +167,51 @@ func (o *OperationsHandler) busyMode(ctx context.Context, operations []*sdwan.Op
 		return
 	}()
 
-	if len(applicationsToEnable) == 0 && len(applicationsToDisable) == 0 {
-		o.log.Debug().Msg("no changes to apply, stopping here")
-		return
-	}
-
-	// Apply
-	pushRequired, err := o.client.CloudExpress().Applications().
-		Toggle(ctx, cloudx.ToggleOptions{
-			Enable:  applicationsToEnable,
-			Disable: applicationsToDisable,
-		})
-	if err != nil {
-		o.log.Err(err).Msg("cannot enable/disable custom application")
-		return
-	}
-
-	if pushRequired {
-		o.log.Info().Msg("applying configuration to all devices...")
-		operationID, err := o.client.CloudExpress().Devices().
-			ApplyConfigurationToAllDevices(ctx)
-		if err != nil {
-			o.log.Err(err).Msg("could not apply configuration to all devices")
+	if o.enableApps {
+		if len(applicationsToEnable) == 0 && len(applicationsToDisable) == 0 {
+			o.log.Debug().Msg("no changes to apply, stopping here")
 			return
 		}
 
-		o.log.Info().Str("operation ID", *operationID).
-			Msg("waiting for operation to complete...")
-		summary, err := o.client.Status().
-			WaitForOperationToFinish(ctx, status.WaitOptions{
-				OperationID: *operationID,
+		// Apply
+		pushRequired, err := o.client.CloudExpress().Applications().
+			Toggle(ctx, cloudx.ToggleOptions{
+				Enable:  applicationsToEnable,
+				Disable: applicationsToDisable,
 			})
 		if err != nil {
-			o.log.Err(err).Msg("error while waiting for opeartion to complete")
+			o.log.Err(err).Msg("cannot enable/disable custom application")
 			return
 		}
 
-		o.log.Info().Str("status", summary.Status).
-			Str("operation ID", *operationID).
-			Msg("applied configuration to all devices")
-	}
+		if pushRequired {
+			o.log.Info().Msg("applying configuration to all devices...")
+			operationID, err := o.client.CloudExpress().Devices().
+				ApplyConfigurationToAllDevices(ctx)
+			if err != nil {
+				o.log.Err(err).Msg("could not apply configuration to all devices")
+				return
+			}
 
-	// And finally, (re)activate the approute policies
-	o.activatePolicies(ctx, applicationsToEnable, []string{})
+			o.log.Info().Str("operation ID", *operationID).
+				Msg("waiting for operation to complete...")
+			summary, err := o.client.Status().
+				WaitForOperationToFinish(ctx, status.WaitOptions{
+					OperationID: *operationID,
+				})
+			if err != nil {
+				o.log.Err(err).Msg("error while waiting for opeartion to complete")
+				return
+			}
+
+			o.log.Info().Str("status", summary.Status).
+				Str("operation ID", *operationID).
+				Msg("applied configuration to all devices")
+		}
+
+		// And finally, (re)activate the approute policies
+		o.activatePolicies(ctx, applicationsToEnable, []string{})
+	}
 
 	// Now delete the custom applications, if any
 	if len(applicationsToDisable) > 0 {

@@ -264,7 +264,7 @@ func runWithVmanage(kopts *kubeConfigOptions, opts *Options) error {
 		}
 		log.Info().Msg("successfully retrieved client for vManage")
 
-		return vmanage.NewOperationsHandler(vclient, *opts.Sdwan.WaitingWindow, log)
+		return vmanage.NewOperationsHandler(vclient, *opts.Sdwan, log)
 	}()
 	if err != nil {
 		return fmt.Errorf("cannot start operations handler for "+

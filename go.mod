@@ -6,7 +6,7 @@ require (
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/enescakir/emoji v1.0.0
 	github.com/google/go-github v17.0.0+incompatible
-	github.com/rs/zerolog v1.29.0
+	github.com/rs/zerolog v1.29.1
 	github.com/spf13/cobra v1.7.0
 	golang.org/x/term v0.7.0
 	gopkg.in/yaml.v3 v3.0.1

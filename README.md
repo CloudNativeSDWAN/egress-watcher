@@ -106,6 +106,10 @@ verbose) to `3` (only log important errors). Default is `1`.
   disable it entirely. For example, if you set `1m`, Egress Watcher will
   wait one minute for other changes to appear before applying them in
   order to improve performance and do bulk operations. Default is `30s`.
+* `--sdwan.enable`: whether to enable/disable the configuration/policies
+  for the added applicaitons. By default, this is not enabled, which means
+  that the egress watcher will just add/update/delete applications and will
+  not enable or disable the policies that apply them.
 
 As a rule of thumb, remember that flag options **overwrite** options provided
 via file.

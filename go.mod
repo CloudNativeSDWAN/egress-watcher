@@ -8,7 +8,7 @@ require (
 	github.com/google/go-github v17.0.0+incompatible
 	github.com/rs/zerolog v1.29.0
 	github.com/spf13/cobra v1.7.0
-	golang.org/x/term v0.7.0
+	golang.org/x/term v0.9.0
 	gopkg.in/yaml.v3 v3.0.1
 	istio.io/api v0.0.0-20230405165810-9eaf4bd27603
 	istio.io/client-go v1.17.1
@@ -57,7 +57,7 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	golang.org/x/net v0.7.0 // indirect
 	golang.org/x/oauth2 v0.0.0-20220223155221-ee480838109b // indirect
-	golang.org/x/sys v0.7.0 // indirect
+	golang.org/x/sys v0.9.0 // indirect
 	golang.org/x/text v0.7.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.2.0 // indirect
